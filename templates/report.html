@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block title %}Báo cáo tổng hợp - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="report-container">
+    <div class="page-header">
+        <h2>📊 Báo cáo tổng hợp</h2>
+        <p>Chọn loại báo cáo bạn muốn xem</p>
+    </div>
+    
+    <div class="report-grid">
+        <!-- Báo cáo đổ dầu -->
+        <div class="report-card">
+            <div class="card-icon">⛽</div>
+            <div class="card-content">
+                <h3>Tổng hợp đổ dầu</h3>
+                <p>Báo cáo chi tiết về số lần và chi phí đổ dầu theo từng xe</p>
+                <a href="/fuel-report" class="btn btn-primary">Xem báo cáo</a>
+            </div>
+        </div>
+
+        <!-- Thống kê tổng hợp -->
+        <div class="report-card">
+            <div class="card-icon">📊</div>
+            <div class="card-content">
+                <h3>Thống kê tổng hợp</h3>
+                <p>Báo cáo hoạt động vận chuyển, chi tiết từng lái xe và số chuyến</p>
+                <a href="/general-report" class="btn btn-info">Xem thống kê</a>
+            </div>
+        </div>
+
+        <!-- Báo cáo tài chính -->
+        <div class="report-card">
+            <div class="card-icon">💰</div>
+            <div class="card-content">
+                <h3>Báo cáo tài chính</h3>
+                <p>Báo cáo thu chi, VAT, chiết khấu và lợi nhuận theo tháng</p>
+                <a href="/finance-report" class="btn btn-success">Xem tài chính</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hướng dẫn đơn giản - Đã ẩn -->
+    <div class="guide-section" style="display: none;">
+        <h3>💡 Hướng dẫn sử dụng</h3>
+        <div class="guide-grid">
+            <div class="guide-item">
+                <strong>⛽ Tổng hợp đổ dầu:</strong>
+                <span>Xem chi tiết số lần đổ dầu, thống kê chi phí nhiên liệu theo xe</span>
+            </div>
+            <div class="guide-item">
+                <strong>📊 Thống kê tổng hợp:</strong>
+                <span>Thống kê hoạt động lái xe, số chuyến và quãng đường</span>
+            </div>
+            <div class="guide-item">
+                <strong>💰 Báo cáo tài chính:</strong>
+                <span>Báo cáo thu chi, VAT, chiết khấu và tính toán lợi nhuận</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.report-container {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.page-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.page-header h2 {
+    color: #333;
+    font-size: 28px;
+    margin-bottom: 10px;
+}
+
+.page-header p {
+    color: #666;
+    font-size: 16px;
+}
+
+.report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 25px;
+    margin-bottom: 40px;
+}
+
+.report-card {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 25px;
+    text-align: center;
+    transition: box-shadow 0.2s ease;
+}
+
+.report-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.card-icon {
+    font-size: 40px;
+    margin-bottom: 15px;
+}
+
+.card-content h3 {
+    color: #333;
+    font-size: 20px;
+    margin-bottom: 10px;
+}
+
+.card-content p {
+    color: #666;
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 20px;
+}
+
+.card-content .btn {
+    padding: 10px 20px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: 500;
+    display: inline-block;
+    transition: background-color 0.2s ease;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #0056b3;
+}
+
+.btn-info {
+    background: #17a2b8;
+    color: white;
+}
+
+.btn-info:hover {
+    background: #138496;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #1e7e34;
+}
+
+.guide-section {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 25px;
+}
+
+.guide-section h3 {
+    color: #333;
+    font-size: 18px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.guide-grid {
+    display: grid;
+    gap: 15px;
+}
+
+.guide-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 15px;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+}
+
+.guide-item strong {
+    color: #333;
+    min-width: 180px;
+    flex-shrink: 0;
+}
+
+.guide-item span {
+    color: #666;
+    line-height: 1.4;
+}
+
+@media (max-width: 768px) {
+    .report-container {
+        padding: 15px;
+    }
+    
+    .page-header h2 {
+        font-size: 24px;
+    }
+    
+    .report-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .report-card {
+        padding: 20px;
+    }
+    
+    .guide-item {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .guide-item strong {
+        min-width: auto;
+    }
+}
+</style>
+{% endblock %}

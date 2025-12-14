@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}Sửa doanh thu - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<h2>✏️ Sửa doanh thu</h2>
+
+<div style="background: rgba(52, 152, 219, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px;">
+    <h3 style="color: #3498db; margin-bottom: 15px;">📝 Thông tin doanh thu</h3>
+    
+    <div style="margin-bottom: 15px; padding: 10px; background: rgba(241, 196, 15, 0.1); border-radius: 5px;">
+        <strong>Mã tuyến:</strong> {{ revenue_record.route.route_code }} <br>
+        <strong>Lộ trình:</strong> {{ revenue_record.route.route_name }} <br>
+        <strong>Ngày:</strong> {{ revenue_record.date.strftime('%d/%m/%Y') }}
+    </div>
+    
+    <form method="post" action="/revenue/edit/{{ revenue_record.id }}" id="edit-revenue-form">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px;">
+            
+            <div class="form-group">
+                <label for="distance_km">Khoảng cách (km) *</label>
+                <input type="number" 
+                       id="distance_km" 
+                       name="distance_km" 
+                       step="0.1" 
+                       min="0"
+                       value="{{ revenue_record.distance_km if revenue_record.distance_km else '' }}"
+                       placeholder="0"
+                       required
+                       onchange="calculateTotal()">
+                <small class="form-help">Khoảng cách thực tế đã chạy</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="unit_price">Đơn giá (VNĐ/km) *</label>
+                <input type="number" 
+                       id="unit_price" 
+                       name="unit_price" 
+                       min="0"
+                       value="{{ revenue_record.unit_price if revenue_record.unit_price else '' }}"
+                       placeholder="0"
+                       required
+                       onchange="calculateTotal()">
+                <small class="form-help">Số nguyên, không cần làm tròn nghìn</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="bridge_fee">Phí cầu đường (VNĐ)</label>
+                <input type="number" 
+                       id="bridge_fee" 
+                       name="bridge_fee" 
+                       min="0"
+                       value="{{ revenue_record.bridge_fee if revenue_record.bridge_fee else '' }}"
+                       placeholder="0"
+                       onchange="calculateTotal()">
+                <small class="form-help">Số nguyên</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="loading_fee">Phí dừng tải (VNĐ)</label>
+                <input type="number" 
+                       id="loading_fee" 
+                       name="loading_fee" 
+                       min="0"
+                       value="{{ revenue_record.loading_fee if revenue_record.loading_fee else '' }}"
+                       placeholder="0"
+                       onchange="calculateTotal()">
+                <small class="form-help">Số nguyên</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="late_penalty">Trễ Ontime (VNĐ)</label>
+                <input type="number" 
+                       id="late_penalty" 
+                       name="late_penalty" 
+                       min="0"
+                       value="{{ revenue_record.late_penalty if revenue_record.late_penalty else '' }}"
+                       placeholder="0"
+                       onchange="calculateTotal()">
+                <small class="form-help">Số nguyên - phí phạt trễ giờ</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="status">Trạng thái</label>
+                <select id="status" name="status" required onchange="toggleFieldsBasedOnStatus()">
+                    <option value="Online" {{ 'selected' if revenue_record.status == 'Online' else '' }}>Online</option>
+                    <option value="Offline" {{ 'selected' if revenue_record.status == 'Offline' else '' }}>Offline</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="manual_total">Thành tiền thủ công (VNĐ)</label>
+                <input type="number" 
+                       id="manual_total" 
+                       name="manual_total" 
+                       min="0"
+                       value="{{ revenue_record.manual_total if revenue_record.manual_total else '' }}"
+                       placeholder="Nhập thủ công khi cần"
+                       onchange="calculateTotal()">
+                <small class="form-help">Để trống nếu muốn dùng công thức tự động</small>
+            </div>
+        </div>
+        
+        <div class="form-group" style="margin-bottom: 20px;">
+            <label for="notes">Ghi chú</label>
+            <textarea id="notes" 
+                      name="notes" 
+                      rows="3" 
+                      placeholder="Nhập ghi chú..."
+                      style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; resize: vertical;">{{ revenue_record.notes if revenue_record.notes else '' }}</textarea>
+        </div>
+        
+        <!-- Hiển thị thành tiền -->
+        <div style="background: rgba(46, 204, 113, 0.1); padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+            <h4 style="color: #27ae60; margin-bottom: 10px;">💰 Thành tiền</h4>
+            <div style="font-size: 24px; font-weight: bold; color: #27ae60;" id="total-amount">
+                {{ "{:,.0f}".format(revenue_record.total_amount) }} VNĐ
+            </div>
+            <small style="color: #7f8c8d; font-style: italic;">
+                Công thức: (Khoảng cách × Đơn giá) + Phí cầu đường + Phí dừng tải – Trễ Ontime
+            </small>
+        </div>
+        
+        <div style="text-align: center; display: flex; gap: 15px; justify-content: center;">
+            <button type="submit" class="btn btn-success" style="padding: 10px 30px; font-size: 16px;">
+                💾 Cập nhật
+            </button>
+            <a href="/revenue?selected_date={{ revenue_record.date.strftime('%Y-%m-%d') }}" 
+               class="btn btn-secondary" 
+               style="padding: 10px 30px; font-size: 16px; text-decoration: none; display: inline-block;">
+                ↩️ Quay lại
+            </a>
+        </div>
+    </form>
+</div>
+
+<!-- Hướng dẫn - Đã ẩn -->
+<div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
+    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Hướng dẫn:</h4>
+    <ul style="color: #2c3e50; line-height: 1.6;">
+        <li><strong>Khoảng cách:</strong> Nhập khoảng cách thực tế đã chạy (có thể khác với khoảng cách tuyến)</li>
+        <li><strong>Đơn giá:</strong> Nhập đơn giá VNĐ/km (số nguyên)</li>
+        <li><strong>Phí cầu đường:</strong> Các khoản phí cầu đường phát sinh</li>
+        <li><strong>Phí dừng tải:</strong> Phí phát sinh khi dừng tải hàng</li>
+        <li><strong>Trễ Ontime:</strong> Phí phạt khi giao hàng trễ giờ</li>
+        <li><strong>Thành tiền:</strong> Được tính tự động theo công thức</li>
+    </ul>
+</div>
+
+<script>
+// Hàm tính toán thành tiền tự động
+function calculateTotal() {
+    const statusSelect = document.getElementById('status');
+    const manualTotalInput = document.getElementById('manual_total');
+    const totalAmountDiv = document.getElementById('total-amount');
+    
+    // Nếu có nhập thủ công thành tiền, ưu tiên sử dụng
+    if (manualTotalInput.value && parseFloat(manualTotalInput.value) > 0) {
+        const manualTotal = parseFloat(manualTotalInput.value) || 0;
+        totalAmountDiv.textContent = manualTotal.toLocaleString('vi-VN', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        }) + ' VNĐ';
+        return;
+    }
+    
+    // Nếu trạng thái là Offline và không có manual total, hiển thị 0
+    if (statusSelect.value === 'Offline') {
+        totalAmountDiv.textContent = '0 VNĐ';
+        return;
+    }
+    
+    // Tính toán tự động cho trạng thái Online
+    const distanceInput = document.getElementById('distance_km');
+    const priceInput = document.getElementById('unit_price');
+    const bridgeFeeInput = document.getElementById('bridge_fee');
+    const loadingFeeInput = document.getElementById('loading_fee');
+    const latePenaltyInput = document.getElementById('late_penalty');
+    
+    const distance = parseFloat(distanceInput.value) || 0;
+    const price = parseFloat(priceInput.value) || 0;
+    const bridgeFee = parseFloat(bridgeFeeInput.value) || 0;
+    const loadingFee = parseFloat(loadingFeeInput.value) || 0;
+    const latePenalty = parseFloat(latePenaltyInput.value) || 0;
+    
+    // Công thức: (Khoảng cách x Đơn giá) + Phí cầu đường + Phí dừng tải – Trễ Ontime
+    const total = Math.max(0, (distance * price) + bridgeFee + loadingFee - latePenalty);
+    
+    // Định dạng số với dấu phẩy
+    totalAmountDiv.textContent = total.toLocaleString('vi-VN', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    }) + ' VNĐ';
+}
+
+// Hàm xử lý khi thay đổi trạng thái Online/Offline
+function toggleFieldsBasedOnStatus() {
+    const statusSelect = document.getElementById('status');
+    const distanceInput = document.getElementById('distance_km');
+    const priceInput = document.getElementById('unit_price');
+    const bridgeFeeInput = document.getElementById('bridge_fee');
+    const loadingFeeInput = document.getElementById('loading_fee');
+    const latePenaltyInput = document.getElementById('late_penalty');
+    const notesInput = document.getElementById('notes');
+    
+    const isOffline = statusSelect.value === 'Offline';
+    
+    // Khóa/mở các trường nhập liệu (trừ notes - luôn cho phép nhập)
+    distanceInput.disabled = isOffline;
+    priceInput.disabled = isOffline;
+    bridgeFeeInput.disabled = isOffline;
+    loadingFeeInput.disabled = isOffline;
+    latePenaltyInput.disabled = isOffline;
+    notesInput.disabled = false; // Luôn cho phép nhập ghi chú
+    
+    // Thay đổi màu nền để hiển thị trạng thái khóa
+    const disabledStyle = 'background-color: #f5f5f5; color: #999;';
+    const enabledStyle = 'background-color: white; color: black;';
+    
+    const style = isOffline ? disabledStyle : enabledStyle;
+    distanceInput.style.cssText += style;
+    priceInput.style.cssText += style;
+    bridgeFeeInput.style.cssText += style;
+    loadingFeeInput.style.cssText += style;
+    latePenaltyInput.style.cssText += style;
+    // Notes luôn có style enabled
+    notesInput.style.cssText += enabledStyle;
+    
+    // Nếu chuyển sang Offline, đặt tất cả trường về 0 (trừ notes)
+    if (isOffline) {
+        distanceInput.value = '0';
+        priceInput.value = '0';
+        bridgeFeeInput.value = '0';
+        loadingFeeInput.value = '0';
+        latePenaltyInput.value = '0';
+        document.getElementById('manual_total').value = '0';
+        // Không xóa notes - cho phép nhập lý do offline
+    }
+    
+    // Tính lại thành tiền
+    calculateTotal();
+}
+
+// Danh sách các tuyến có giá trị mặc định 227,273
+const defaultAmountRoutes = ['NA_005', 'NA_005-1', 'NA_013-02', 'NA_013-03', 'NA_013-04', 'NA_013-02-1', 'NA_014'];
+
+// Hàm tự động điền giá trị mặc định cho các tuyến đặc biệt
+function autoFillDefaultAmount(routeCode) {
+    if (defaultAmountRoutes.includes(routeCode)) {
+        const manualTotalInput = document.getElementById('manual_total');
+        if (manualTotalInput && !manualTotalInput.value) {
+            manualTotalInput.value = '227273';
+            calculateTotal();
+        }
+    }
+}
+
+// Tự động tính toán khi trang load
+document.addEventListener('DOMContentLoaded', function() {
+    toggleFieldsBasedOnStatus();
+    calculateTotal();
+    autoFillDefaultAmount('{{ revenue_record.route.route_code }}');
+});
+</script>
+
+{% endblock %}

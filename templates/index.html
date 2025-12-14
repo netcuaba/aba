@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Trang chủ - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3>{{ employees_count or 0 }}</h3>
+        <p>Tổng nhân viên</p>
+    </div>
+    <div class="stat-card">
+        <h3>{{ vehicles_count or 0 }}</h3>
+        <p>Tổng xe</p>
+    </div>
+    <div class="stat-card">
+        <h3>{{ routes_count or 0 }}</h3>
+        <p>Tuyến đường</p>
+    </div>
+    <div class="stat-card">
+        <h3>{{ daily_routes_count or 0 }}</h3>
+        <p>Chuyến hôm nay</p>
+    </div>
+</div>
+
+<h2>Chức năng chính</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-top: 20px;">
+    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
+        <h3 style="margin-bottom: 10px;">Quản lý nhân viên</h3>
+        <p style="margin-bottom: 10px;">Thêm, sửa, xóa thông tin nhân viên và lương cơ bản</p>
+        <a href="/employees" class="btn">Quản lý nhân viên</a>
+    </div>
+    
+    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
+        <h3 style="margin-bottom: 10px;">Quản lý xe</h3>
+        <p style="margin-bottom: 10px;">Quản lý thông tin xe, biển số, trọng tải và tiêu hao nhiên liệu</p>
+        <a href="/vehicles" class="btn">Quản lý xe</a>
+    </div>
+    
+    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
+        <h3 style="margin-bottom: 10px;">Quản lý tuyến</h3>
+        <p style="margin-bottom: 10px;">Thiết lập tuyến đường, khoảng cách, đơn giá và phân công nhân viên</p>
+        <a href="/routes" class="btn">Quản lý tuyến</a>
+    </div>
+    
+    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
+        <h3 style="margin-bottom: 10px;">Bảng chấm công</h3>
+        <p style="margin-bottom: 10px;">Ghi nhận chuyến hàng hàng ngày, chi phí xăng dầu và lương chuyến</p>
+        <a href="/daily-new" class="btn">Ghi nhận chuyến</a>
+    </div>
+    
+    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
+        <h3 style="margin-bottom: 10px;">Thống kê tổng hợp</h3>
+        <p style="margin-bottom: 10px;">Xem thống kê hoạt động vận chuyển, báo cáo chi tiết theo lái xe và xuất dữ liệu</p>
+        <a href="/salary-simple" class="btn">Thống kê tổng hợp</a>
+    </div>
+</div>
+
+<!-- Hướng dẫn sử dụng - Đã ẩn -->
+<h2 style="display: none; margin-top: 30px;">Hướng dẫn sử dụng</h2>
+<div style="display: none; background: white; padding: 20px; border: 1px solid #ddd; margin-top: 15px;">
+    <ol style="line-height: 1.8;">
+        <li><strong>Thêm nhân viên:</strong> Vào mục "Nhân viên" để thêm thông tin nhân viên và lương cơ bản</li>
+        <li><strong>Thêm xe:</strong> Vào mục "Xe" để thêm thông tin xe và biển số</li>
+        <li><strong>Thiết lập tuyến:</strong> Vào mục "Tuyến đường" để tạo tuyến và phân công nhân viên</li>
+        <li><strong>Ghi nhận chuyến:</strong> Mỗi ngày vào mục "Bảng chấm công" để ghi nhận chuyến đã chạy</li>
+        <li><strong>Thống kê tổng hợp:</strong> Cuối tháng vào mục "Thống kê tổng hợp" để xem báo cáo chi tiết hoạt động</li>
+    </ol>
+</div>
+{% endblock %}

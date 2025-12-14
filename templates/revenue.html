@@ -1,0 +1,517 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý doanh thu - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<h2>💰 Quản lý doanh thu</h2>
+
+<!-- Date Selector -->
+<div style="margin-bottom: 30px; padding: 15px; background: rgba(52, 152, 219, 0.1); border-radius: 8px;">
+    <form method="get" action="/revenue" style="display: inline-block;">
+        <label for="selected_date" style="color: #2c3e50; margin-right: 10px; font-weight: bold;">Chọn ngày:</label>
+        <input type="date" 
+               id="selected_date" 
+               name="selected_date" 
+               value="{{ filter_date.strftime('%Y-%m-%d') }}" 
+               style="padding: 8px; border: 2px solid #3498db; border-radius: 5px; font-size: 14px;"
+               onchange="this.form.submit()">
+        <button type="submit" style="margin-left: 10px; padding: 8px 15px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">
+            🔍 Xem
+        </button>
+    </form>
+    <div style="margin-top: 10px; color: #7f8c8d; font-size: 12px;">
+        Hiển thị doanh thu ngày: <strong>{{ filter_date.strftime('%d/%m/%Y') }}</strong>
+        {% if filter_date == today %}
+            (Hôm nay)
+        {% endif %}
+    </div>
+</div>
+
+<!-- Form nhập doanh thu -->
+<div style="background: rgba(243, 156, 18, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px;">
+    <h3 style="color: #f39c12; margin-bottom: 15px;">📝 Nhập Doanh Thu Theo Mã Tuyến</h3>
+    
+    <form method="post" action="/revenue/add" id="revenue-form">
+        <input type="hidden" name="date" value="{{ filter_date.strftime('%Y-%m-%d') }}">
+        
+        {% if routes %}
+        <div class="table-container">
+            <table class="table" style="background: white; margin-bottom: 0;">
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Mã tuyến</th>
+                        <th>Khoảng cách (km)</th>
+                        <th>Đơn giá (VNĐ/km)</th>
+                        <th>Phí cầu đường (VNĐ)</th>
+                        <th>Phí dừng tải (VNĐ)</th>
+                        <th>Trễ Ontime (VNĐ)</th>
+                        <th>Trạng thái</th>
+                        <th>Thành tiền (VNĐ)</th>
+                        <th>Ghi chú</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for route in routes %}
+                    {% set existing_records = revenue_dict.get(route.id) %}
+                    {% if existing_records is iterable and existing_records is not string %}
+                        {# Với "Tăng cường", lấy record cuối cùng để hiển thị giá trị mặc định #}
+                        {% set existing_record = existing_records[-1] if existing_records else None %}
+                    {% else %}
+                        {# Với tuyến thường #}
+                        {% set existing_record = existing_records %}
+                    {% endif %}
+                    <tr>
+                        <td style="text-align: center; font-weight: bold;">{{ loop.index }}</td>
+                        <td style="white-space: nowrap;">
+                            <strong>{{ route.route_code }}</strong>
+                        </td>
+                        <td>
+                            <input type="number" 
+                                   name="distance_km_{{ route.id }}" 
+                                   step="0.1" 
+                                   min="0"
+                                   value="{{ existing_record.distance_km if existing_record else (default_values.get(route.id, {}).get('distance_km') if default_values.get(route.id) else (route.distance if route.distance else '')) }}"
+                                   placeholder="{{ route.distance if route.distance else '0' }}"
+                                   style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px;"
+                                   onchange="calculateTotal({{ route.id }})">
+                        </td>
+                        <td>
+                            <input type="number" 
+                                   name="unit_price_{{ route.id }}" 
+                                   min="0"
+                                   value="{{ existing_record.unit_price if existing_record and existing_record.unit_price else (default_values.get(route.id, {}).get('unit_price') if default_values.get(route.id) else '') }}"
+                                   placeholder="0"
+                                   style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px;"
+                                   onchange="calculateTotal({{ route.id }})">
+                        </td>
+                        <td>
+                            <input type="number" 
+                                   name="bridge_fee_{{ route.id }}" 
+                                   min="0"
+                                   value="{{ existing_record.bridge_fee if existing_record and existing_record.bridge_fee else (default_values.get(route.id, {}).get('bridge_fee') if default_values.get(route.id) else '') }}"
+                                   placeholder="0"
+                                   style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px;"
+                                   onchange="calculateTotal({{ route.id }})">
+                        </td>
+                        <td>
+                            <input type="number" 
+                                   name="loading_fee_{{ route.id }}" 
+                                   min="0"
+                                   value="{{ existing_record.loading_fee if existing_record and existing_record.loading_fee else (default_values.get(route.id, {}).get('loading_fee') if default_values.get(route.id) else '') }}"
+                                   placeholder="0"
+                                   style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px;"
+                                   onchange="calculateTotal({{ route.id }})">
+                        </td>
+                        <td>
+                            <input type="number" 
+                                   name="late_penalty_{{ route.id }}" 
+                                   min="0"
+                                   value="{{ existing_record.late_penalty if existing_record and existing_record.late_penalty else (default_values.get(route.id, {}).get('late_penalty') if default_values.get(route.id) else '') }}"
+                                   placeholder="0"
+                                   style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px;"
+                                   onchange="calculateTotal({{ route.id }})">
+                        </td>
+                        <td>
+                            <select name="status_{{ route.id }}" 
+                                    style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px;"
+                                    onchange="toggleFieldsBasedOnStatus({{ route.id }})">
+                                {% set default_status = default_values.get(route.id, {}).get('status') if default_values.get(route.id) else 'Online' %}
+                                <option value="Online" {{ 'selected' if (not existing_record and default_status == 'Online') or (existing_record and existing_record.status == 'Online') else '' }}>Online</option>
+                                <option value="Offline" {{ 'selected' if (not existing_record and default_status == 'Offline') or (existing_record and existing_record.status == 'Offline') else '' }}>Offline</option>
+                            </select>
+                        </td>
+                        <td>
+                            <div style="display: flex; flex-direction: column; gap: 5px;">
+                                <!-- Thành tiền tự động tính -->
+                                <span id="total_{{ route.id }}" style="font-weight: bold; color: #27ae60; font-size: 12px;">
+                                    {% if existing_record and existing_record.manual_total > 0 %}
+                                        {{ "{:,.0f}".format(existing_record.manual_total) }}
+                                    {% elif existing_record %}
+                                        {{ "{:,.0f}".format(existing_record.total_amount) }}
+                                    {% else %}
+                                        0
+                                    {% endif %}
+                                </span>
+                                <!-- Trường nhập thành tiền thủ công -->
+                                <input type="number" 
+                                       name="manual_total_{{ route.id }}" 
+                                       min="0"
+                                       value="{{ existing_record.manual_total if existing_record and existing_record.manual_total > 0 else '' }}"
+                                       placeholder="Nhập thủ công"
+                                       style="width: 100%; padding: 3px; border: 1px solid #ddd; border-radius: 3px; font-size: 11px;"
+                                       onchange="handleManualTotal({{ route.id }})">
+                            </div>
+                        </td>
+                        <td>
+                            <input type="text" 
+                                   name="notes_{{ route.id }}" 
+                                   value="{{ existing_record.notes if existing_record else (default_values.get(route.id, {}).get('notes') if default_values.get(route.id) else '') }}"
+                                   placeholder="Ghi chú..."
+                                   style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="text-align: center;">
+            <button type="submit" class="btn btn-success" style="padding: 10px 30px; font-size: 16px;">
+                💾 Lưu doanh thu
+            </button>
+        </div>
+        {% else %}
+        <div style="text-align: center; padding: 40px; background: rgba(39, 174, 96, 0.1); border-radius: 10px; border-left: 4px solid #27ae60;">
+            <h4 style="color: #27ae60; margin-bottom: 10px;">✅ Hoàn thành nhập doanh thu!</h4>
+            <p style="color: #2c3e50; margin: 0;">
+                Tất cả tuyến đã được nhập doanh thu cho ngày {{ filter_date.strftime('%d/%m/%Y') }}.<br>
+                Bạn có thể xem danh sách doanh thu đã ghi nhận bên dưới.
+            </p>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<!-- Doanh thu đã ghi nhận -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+    <h3 style="margin: 0;">📊 Doanh thu đã ghi nhận</h3>
+    {% if revenue_dict %}
+    <button onclick="deleteAllRevenue()" 
+            class="btn btn-danger" 
+            style="background: #e74c3c; color: white; padding: 8px 15px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; transition: all 0.2s;"
+            onmouseover="this.style.background='#c0392b'; this.style.transform='scale(1.05)'"
+            onmouseout="this.style.background='#e74c3c'; this.style.transform='scale(1)'"
+            title="Xóa tất cả doanh thu trong ngày">
+        🗑️ Xoá tất cả
+    </button>
+    {% endif %}
+</div>
+
+<!-- Success message for delete all -->
+{% if deleted_all == 'true' %}
+<div style="background: rgba(39, 174, 96, 0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #27ae60;">
+    <p style="margin: 0; color: #27ae60; font-weight: bold;">
+        ✅ Đã xoá tất cả doanh thu trong ngày {{ filter_date.strftime('%d/%m/%Y') }}
+    </p>
+</div>
+{% endif %}
+
+{% if revenue_dict %}
+<div style="background: rgba(39, 174, 96, 0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+    <p style="margin: 0; color: #27ae60; font-weight: bold;">
+        ✅ Đã ghi nhận {{ revenue_dict|length }} tuyến doanh thu ngày {{ filter_date.strftime('%d/%m/%Y') }}
+    </p>
+</div>
+
+<div class="table-container">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>STT</th>
+                <th>Mã tuyến</th>
+                <th>Khoảng cách (km)</th>
+                <th>Đơn giá (VNĐ/km)</th>
+                <th>Phí cầu đường (VNĐ)</th>
+                <th>Phí dừng tải (VNĐ)</th>
+                <th>Trễ Ontime (VNĐ)</th>
+                <th>Trạng thái</th>
+                <th>Thành tiền (VNĐ)</th>
+                <th>Ghi chú</th>
+                <th>Thao tác</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set revenue_list = [] %}
+            {% for route in all_routes %}
+                {% if revenue_dict.get(route.id) %}
+                    {% set records = revenue_dict[route.id] %}
+                    {% if records is iterable and records is not string %}
+                        {# Nhiều records cho "Tăng cường" #}
+                        {% for record in records %}
+                            {% set _ = revenue_list.append((route, record, loop.index)) %}
+                        {% endfor %}
+                    {% else %}
+                        {# Một record cho tuyến thường #}
+                        {% set _ = revenue_list.append((route, records, 1)) %}
+                    {% endif %}
+                {% endif %}
+            {% endfor %}
+            
+            {% for route, record, tang_cuong_index in revenue_list %}
+            <tr>
+                <td style="text-align: center; font-weight: bold;">{{ loop.index }}</td>
+                <td style="white-space: nowrap;">
+                    {% if route.route_code and route.route_code.strip() == "Tăng Cường" and tang_cuong_index > 1 %}
+                        <strong>{{ route.route_code }} #{{ tang_cuong_index }}</strong>
+                    {% else %}
+                        <strong>{{ route.route_code }}</strong>
+                    {% endif %}
+                </td>
+                <td class="number">{{ "{:,.1f}".format(record.distance_km) if record.distance_km else "-" }}</td>
+                <td class="number">{{ "{:,.0f}".format(record.unit_price) if record.unit_price else "-" }}</td>
+                <td class="number">{{ "{:,.0f}".format(record.bridge_fee) if record.bridge_fee else "-" }}</td>
+                <td class="number">{{ "{:,.0f}".format(record.loading_fee) if record.loading_fee else "-" }}</td>
+                <td class="number">{{ "{:,.0f}".format(record.late_penalty) if record.late_penalty else "-" }}</td>
+                <td style="text-align: center;">
+                    <span style="padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; 
+                                 background-color: {{ '#d4edda' if record.status == 'Online' else '#f8d7da' }};
+                                 color: {{ '#155724' if record.status == 'Online' else '#721c24' }};">
+                        {{ record.status }}
+                    </span>
+                </td>
+                <td class="number" style="font-weight: bold; color: #27ae60;">
+                    {% if record.manual_total > 0 %}
+                        {{ "{:,.0f}".format(record.manual_total) }}
+                    {% else %}
+                        {{ "{:,.0f}".format(record.total_amount) }}
+                    {% endif %}
+                </td>
+                <td>{{ record.notes if record.notes else "Không có" }}</td>
+                <td>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <a href="/revenue/edit/{{ record.id }}" 
+                           class="btn btn-sm" 
+                           style="background: #3498db; color: white; padding: 3px 8px; font-size: 11px; text-decoration: none; border-radius: 3px; transition: all 0.2s;"
+                           onmouseover="this.style.background='#2980b9'; this.style.transform='scale(1.05)'"
+                           onmouseout="this.style.background='#3498db'; this.style.transform='scale(1)'"
+                           title="Sửa doanh thu">
+                            ✏️ Sửa
+                        </a>
+                        <button onclick="deleteRevenue({{ record.id }})" 
+                                class="btn btn-sm btn-danger" 
+                                style="padding: 3px 8px; font-size: 11px; border: none; border-radius: 3px; transition: all 0.2s;"
+                                onmouseover="this.style.transform='scale(1.05)'"
+                                onmouseout="this.style.transform='scale(1)'"
+                                title="Xóa doanh thu">
+                            🗑️ Xóa
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+            
+        </tbody>
+    </table>
+</div>
+
+<div style="margin-top: 20px; padding: 20px; background: rgba(39, 174, 96, 0.1); border-radius: 10px; border-left: 4px solid #27ae60;">
+    <h4 style="color: #27ae60; margin-bottom: 10px;">📊 Tổng kết:</h4>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+        <div>
+            <strong>Số tuyến:</strong> {{ revenue_dict|length }}
+        </div>
+        <div>
+            <strong>Tổng doanh thu:</strong> 
+            {% set revenue_amounts = [] %}
+            {% for route, record, tang_cuong_index in revenue_list %}
+                {% if record.manual_total > 0 %}
+                    {% set _ = revenue_amounts.append(record.manual_total) %}
+                {% else %}
+                    {% set _ = revenue_amounts.append(record.total_amount) %}
+                {% endif %}
+            {% endfor %}
+            {{ "{:,.0f}".format(revenue_amounts | sum) }} VNĐ
+        </div>
+        <div>
+            <strong>Trạng thái Online:</strong> {{ revenue_list|selectattr('1.status', 'equalto', 'Online')|list|length }}
+        </div>
+        <div>
+            <strong>Trạng thái Offline:</strong> {{ revenue_list|selectattr('1.status', 'equalto', 'Offline')|list|length }}
+        </div>
+    </div>
+</div>
+{% else %}
+<div style="text-align: center; padding: 40px; color: #7f8c8d;">
+    <h3>📊 Chưa có dữ liệu doanh thu ngày {{ filter_date.strftime('%d/%m/%Y') }}</h3>
+    <p>Hãy nhập dữ liệu doanh thu bằng form bên trên</p>
+</div>
+{% endif %}
+
+<!-- Hướng dẫn sử dụng - Đã ẩn -->
+<div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
+    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Hướng dẫn sử dụng:</h4>
+    <ul style="color: #2c3e50; line-height: 1.6;">
+        <li><strong>Chọn ngày:</strong> Sử dụng bộ chọn ngày để xem/nhập doanh thu cho ngày cụ thể</li>
+        <li><strong>Tự động điền:</strong> Khi tạo bản ghi doanh thu cho ngày mới, hệ thống tự động điền sẵn các giá trị từ ngày gần nhất có dữ liệu khác 0</li>
+        <li><strong>Khoảng cách:</strong> Lấy giá trị mặc định từ tuyến đường hoặc ngày gần nhất, có thể chỉnh sửa khi thay đổi lộ trình</li>
+        <li><strong>Đơn giá:</strong> Nhập đơn giá VNĐ/km (số nguyên, không cần làm tròn nghìn)</li>
+        <li><strong>Phí cầu đường:</strong> Nhập phí cầu đường (số nguyên)</li>
+        <li><strong>Phí dừng tải:</strong> Nhập phí dừng tải (số nguyên)</li>
+        <li><strong>Trễ Ontime:</strong> Nhập phí phạt trễ giờ (số nguyên)</li>
+        <li><strong>Thành tiền:</strong> Được tính tự động = (Khoảng cách × Đơn giá) + Phí cầu đường + Phí dừng tải – Trễ Ontime</li>
+        <li><strong>Nhập thủ công:</strong> Có thể nhập thành tiền thủ công, sẽ ghi đè công thức tự động</li>
+        <li><strong>Tự động điền:</strong> Các tuyến NA_005, NA_005-1, NA_013-02, NA_013-03, NA_013-04, NA_013-02-1, NA_014 sẽ tự động điền giá trị 227,273 VNĐ</li>
+        <li><strong>Trạng thái Online:</strong> Cho phép nhập tất cả các trường, tính toán theo công thức</li>
+        <li><strong>Trạng thái Offline:</strong> Khóa tất cả trường nhập liệu, chỉ cho phép nhập thành tiền thủ công và ghi chú (để ghi lý do offline)</li>
+        <li><strong>Chỉnh sửa:</strong> Tất cả các ô nhập đều cho phép chỉnh sửa thủ công sau khi tự động điền</li>
+        <li><strong>Lưu dữ liệu:</strong> Chỉ cần nhập vào các trường có dữ liệu, bỏ trống những tuyến không chạy</li>
+    </ul>
+</div>
+
+{% if not all_routes and not revenue_dict %}
+<div style="margin-top: 20px; padding: 20px; background: rgba(231, 76, 60, 0.1); border-radius: 10px; border-left: 4px solid #e74c3c;">
+    <h4 style="color: #e74c3c; margin-bottom: 10px;">⚠️ Chưa có tuyến nào:</h4>
+    <p style="color: #2c3e50;">Cần tạo tuyến đường trước khi ghi nhận doanh thu. <a href="/routes" style="color: #3498db;">Tạo tuyến ngay</a></p>
+</div>
+{% endif %}
+
+<script>
+// Hàm tính toán thành tiền tự động theo công thức mới
+function calculateTotal(routeId) {
+    const statusSelect = document.querySelector(`select[name="status_${routeId}"]`);
+    const manualTotalInput = document.querySelector(`input[name="manual_total_${routeId}"]`);
+    const totalSpan = document.getElementById(`total_${routeId}`);
+    
+    // Nếu có nhập thủ công thành tiền, ưu tiên sử dụng
+    if (manualTotalInput.value && parseFloat(manualTotalInput.value) > 0) {
+        const manualTotal = parseFloat(manualTotalInput.value) || 0;
+        totalSpan.textContent = manualTotal.toLocaleString('vi-VN', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        });
+        return;
+    }
+    
+    // Nếu trạng thái là Offline và không có manual total, hiển thị 0
+    if (statusSelect.value === 'Offline') {
+        totalSpan.textContent = '0';
+        return;
+    }
+    
+    // Tính toán tự động cho trạng thái Online
+    const distanceInput = document.querySelector(`input[name="distance_km_${routeId}"]`);
+    const priceInput = document.querySelector(`input[name="unit_price_${routeId}"]`);
+    const bridgeFeeInput = document.querySelector(`input[name="bridge_fee_${routeId}"]`);
+    const loadingFeeInput = document.querySelector(`input[name="loading_fee_${routeId}"]`);
+    const latePenaltyInput = document.querySelector(`input[name="late_penalty_${routeId}"]`);
+    
+    const distance = parseFloat(distanceInput.value) || 0;
+    const price = parseFloat(priceInput.value) || 0;
+    const bridgeFee = parseFloat(bridgeFeeInput.value) || 0;
+    const loadingFee = parseFloat(loadingFeeInput.value) || 0;
+    const latePenalty = parseFloat(latePenaltyInput.value) || 0;
+    
+    // Công thức: Thành tiền = (Khoảng cách x Đơn giá) + Phí cầu đường + Phí dừng tải – Trễ Ontime
+    const total = Math.max(0, (distance * price) + bridgeFee + loadingFee - latePenalty);
+    
+    // Định dạng số với dấu phẩy
+    totalSpan.textContent = total.toLocaleString('vi-VN', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    });
+}
+
+// Hàm xử lý khi thay đổi trạng thái Online/Offline
+function toggleFieldsBasedOnStatus(routeId) {
+    const statusSelect = document.querySelector(`select[name="status_${routeId}"]`);
+    const distanceInput = document.querySelector(`input[name="distance_km_${routeId}"]`);
+    const priceInput = document.querySelector(`input[name="unit_price_${routeId}"]`);
+    const bridgeFeeInput = document.querySelector(`input[name="bridge_fee_${routeId}"]`);
+    const loadingFeeInput = document.querySelector(`input[name="loading_fee_${routeId}"]`);
+    const latePenaltyInput = document.querySelector(`input[name="late_penalty_${routeId}"]`);
+    const notesInput = document.querySelector(`input[name="notes_${routeId}"]`);
+    const manualTotalInput = document.querySelector(`input[name="manual_total_${routeId}"]`);
+    
+    const isOffline = statusSelect.value === 'Offline';
+    
+    // Khóa/mở các trường nhập liệu (trừ notes - luôn cho phép nhập)
+    distanceInput.disabled = isOffline;
+    priceInput.disabled = isOffline;
+    bridgeFeeInput.disabled = isOffline;
+    loadingFeeInput.disabled = isOffline;
+    latePenaltyInput.disabled = isOffline;
+    notesInput.disabled = false; // Luôn cho phép nhập ghi chú
+    
+    // Thay đổi màu nền để hiển thị trạng thái khóa
+    const disabledStyle = 'background-color: #f5f5f5; color: #999;';
+    const enabledStyle = 'background-color: white; color: black;';
+    
+    const style = isOffline ? disabledStyle : enabledStyle;
+    distanceInput.style.cssText += style;
+    priceInput.style.cssText += style;
+    bridgeFeeInput.style.cssText += style;
+    loadingFeeInput.style.cssText += style;
+    latePenaltyInput.style.cssText += style;
+    // Notes luôn có style enabled
+    notesInput.style.cssText += enabledStyle;
+    
+    // Nếu chuyển sang Offline, đặt tất cả trường về 0 (trừ notes)
+    if (isOffline) {
+        distanceInput.value = '0';
+        priceInput.value = '0';
+        bridgeFeeInput.value = '0';
+        loadingFeeInput.value = '0';
+        latePenaltyInput.value = '0';
+        manualTotalInput.value = '0';
+        // Không xóa notes - cho phép nhập lý do offline
+    }
+    
+    // Tính lại thành tiền
+    calculateTotal(routeId);
+}
+
+// Hàm xử lý khi nhập thành tiền thủ công
+function handleManualTotal(routeId) {
+    calculateTotal(routeId);
+}
+
+// Danh sách các tuyến có giá trị mặc định 227,273
+const defaultAmountRoutes = ['NA_005', 'NA_005-1', 'NA_013-02', 'NA_013-03', 'NA_013-04', 'NA_013-02-1', 'NA_014'];
+
+// Hàm tự động điền giá trị mặc định cho các tuyến đặc biệt
+function autoFillDefaultAmount(routeId, routeCode) {
+    if (defaultAmountRoutes.includes(routeCode)) {
+        const manualTotalInput = document.querySelector(`input[name="manual_total_${routeId}"]`);
+        if (manualTotalInput && !manualTotalInput.value) {
+            manualTotalInput.value = '227273';
+            calculateTotal(routeId);
+        }
+    }
+}
+
+// Tự động tính toán khi trang load
+document.addEventListener('DOMContentLoaded', function() {
+    // Tính toán và thiết lập trạng thái cho tất cả các tuyến trong form nhập
+    {% for route in routes %}
+    toggleFieldsBasedOnStatus({{ route.id }});
+    calculateTotal({{ route.id }});
+    autoFillDefaultAmount({{ route.id }}, '{{ route.route_code }}');
+    {% endfor %}
+});
+
+// Hàm xóa một doanh thu
+function deleteRevenue(revenueId) {
+    if (confirm('Bạn có chắc chắn muốn xóa doanh thu này?')) {
+        // Tạo form để submit POST request
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/revenue/delete/' + revenueId;
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+// Hàm xóa tất cả doanh thu trong ngày
+function deleteAllRevenue() {
+    const selectedDate = '{{ filter_date.strftime('%d/%m/%Y') }}';
+    if (confirm(`Bạn có chắc chắn muốn xoá tất cả doanh thu đã ghi nhận trong ngày ${selectedDate} không?`)) {
+        // Tạo form để submit POST request
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/revenue/delete-all';
+        
+        // Thêm input hidden cho ngày
+        const dateInput = document.createElement('input');
+        dateInput.type = 'hidden';
+        dateInput.name = 'date';
+        dateInput.value = '{{ filter_date.strftime('%Y-%m-%d') }}';
+        form.appendChild(dateInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+</script>
+
+{% endblock %}

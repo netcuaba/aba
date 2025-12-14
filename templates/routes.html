@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý tuyến đường - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<h2>🛣️ Quản lý tuyến đường</h2>
+
+<div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px;">
+    <h3 style="color: #9b59b6; margin-bottom: 15px;">➕ Thêm tuyến mới</h3>
+    <form method="post" action="/routes/add" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+        <div class="form-group">
+            <label for="route_code">Mã tuyến *</label>
+            <input type="text" id="route_code" name="route_code" required placeholder="VD: NA_002">
+        </div>
+        <div class="form-group">
+            <label for="route_name">Lộ trình *</label>
+            <input type="text" id="route_name" name="route_name" required placeholder="VD: Kho Trung Chuyển -> Bưu Cục">
+        </div>
+        <div class="form-group">
+            <label for="distance">Khoảng cách (km)</label>
+            <input type="number" id="distance" name="distance" step="0.1" placeholder="VD: 178">
+        </div>
+        <div class="form-group">
+            <label for="monthly_salary">Lương tuyến/tháng (VNĐ)</label>
+            <input type="number" id="monthly_salary" name="monthly_salary" min="0" placeholder="VD: 10500000" 
+                   oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help">Nhập số nguyên (ví dụ: 10,500,000 hoặc 10500000)</small>
+        </div>
+        <div class="form-group" style="display: flex; align-items: end;">
+            <button type="submit" class="btn btn-success">Thêm tuyến</button>
+        </div>
+    </form>
+</div>
+
+<h3>📋 Danh sách tuyến đường</h3>
+{% if routes %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>STT</th>
+            <th style="width: 150px;">Mã tuyến</th>
+            <th>Lộ trình</th>
+            <th>Khoảng cách (KM)</th>
+            <th>Lương tuyến/tháng</th>
+            <th>Thao tác</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for route in routes %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td style="white-space: nowrap;"><strong>{{ route.route_code }}</strong></td>
+            <td>{{ route.route_name }}</td>
+            <td>{{ "{:,.0f}".format(route.distance) if route.distance else "-" }}</td>
+            <td class="number">{{ "{:,.0f}".format(route.monthly_salary) if route.monthly_salary else "-" }}</td>
+            <td>
+                <div style="display: flex; gap: 5px;">
+                    <a href="/routes/edit/{{ route.id }}" class="btn btn-sm btn-primary" style="padding: 5px 10px; font-size: 12px;">Sửa</a>
+                    <form method="post" action="/routes/delete/{{ route.id }}" style="display: inline;" onsubmit="return confirm('Bạn có chắc chắn muốn xóa tuyến này?')">
+                        <button type="submit" class="btn btn-sm btn-danger" style="padding: 5px 10px; font-size: 12px;">Xóa</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div style="text-align: center; padding: 40px; color: #7f8c8d;">
+    <h3>🛣️ Chưa có tuyến nào</h3>
+    <p>Hãy thêm tuyến đầu tiên bằng form bên trên</p>
+</div>
+{% endif %}
+
+<!-- Lưu ý - Đã ẩn -->
+<div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
+    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Lưu ý:</h4>
+    <ul style="color: #2c3e50; line-height: 1.6;">
+        <li>Mã tuyến phải là duy nhất trong hệ thống</li>
+        <li>Lộ trình mô tả chi tiết tuyến đường vận chuyển</li>
+        <li>Khoảng cách giúp tính toán chi phí vận chuyển chính xác</li>
+        <li>Lương tuyến/tháng là mức lương cố định cho tuyến này mỗi tháng</li>
+        <li>Nhân viên sẽ được phân công khi ghi nhận chuyến hàng ngày</li>
+    </ul>
+</div>
+
+{% endblock %}

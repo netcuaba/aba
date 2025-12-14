@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Sửa bản ghi đổ dầu - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="edit-fuel-page">
+    <div class="page-header">
+        <h2>✏️ Sửa bản ghi đổ dầu</h2>
+        <p>Chỉnh sửa thông tin đổ dầu cho xe {{ fuel_record.license_plate }}</p>
+    </div>
+
+    <div class="edit-section">
+        <div class="card">
+            <form method="POST" action="/fuel/edit/{{ fuel_record.id }}" class="fuel-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="date">Ngày đổ dầu:</label>
+                        <input type="date" id="date" name="date" value="{{ fuel_record.date.strftime('%Y-%m-%d') }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="fuel_type">Loại dầu:</label>
+                        <select id="fuel_type" name="fuel_type">
+                            <option value="Dầu DO 0,05S-II" {% if fuel_record.fuel_type == "Dầu DO 0,05S-II" %}selected{% endif %}>Dầu DO 0,05S-II</option>
+                            <!-- Có thể thêm các loại dầu khác sau này -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="license_plate">Biển số xe:</label>
+                        <select id="license_plate" name="license_plate" required>
+                            <option value="">-- Chọn xe --</option>
+                            {% for vehicle in vehicles %}
+                            <option value="{{ vehicle.license_plate }}" {% if vehicle.license_plate == fuel_record.license_plate %}selected{% endif %}>
+                                {{ vehicle.license_plate }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="fuel_price_per_liter">Giá xăng dầu hôm nay (đồng/lít):</label>
+                        <input type="number" id="fuel_price_per_liter" name="fuel_price_per_liter" step="0.01" min="0" 
+                               value="{{ fuel_record.fuel_price_per_liter }}" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label for="liters_pumped">Số lít dầu đã đổ:</label>
+                        <input type="number" id="liters_pumped" name="liters_pumped" step="0.001" min="0" 
+                               value="{{ fuel_record.liters_pumped }}" placeholder="0.000">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="cost_pumped">Số tiền dầu đã đổ (VNĐ):</label>
+                        <input type="number" id="cost_pumped" name="cost_pumped" step="0.01" min="0" 
+                               value="{{ fuel_record.cost_pumped }}" placeholder="0.00" readonly>
+                        <small class="form-help">Tự động tính: Giá xăng dầu × Số lít dầu đã đổ</small>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <label for="notes">Ghi chú:</label>
+                        <textarea id="notes" name="notes" rows="3" placeholder="Ghi chú thêm...">{{ fuel_record.notes or '' }}</textarea>
+                    </div>
+                </div>
+
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">Cập nhật bản ghi</button>
+                    <a href="/fuel" class="btn btn-secondary">Hủy</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Tính toán tự động khi nhập dữ liệu
+document.addEventListener('input', function(e) {
+    if (e.target.id === 'fuel_price_per_liter' || e.target.id === 'liters_pumped') {
+        const fuelPrice = parseFloat(document.getElementById('fuel_price_per_liter').value) || 0;
+        const litersPumped = parseFloat(document.getElementById('liters_pumped').value) || 0;
+        const costPumped = fuelPrice * litersPumped;
+        
+        const costPumpedInput = document.getElementById('cost_pumped');
+        if (costPumpedInput) {
+            // Làm tròn đến đơn vị đồng (0 chữ số thập phân)
+            costPumpedInput.value = Math.round(costPumped).toFixed(0);
+        }
+    }
+});
+</script>
+{% endblock %}

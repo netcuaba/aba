@@ -1,0 +1,961 @@
+{% extends "base.html" %}
+
+{% block title %}Bảng tính lương - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<!-- Thanh tiêu đề ngắn gọn -->
+<div class="page-header">
+    <div class="header-content">
+        <h2>💰 Bảng tính lương</h2>
+        <div class="tooltip-container">
+            <span class="tooltip-icon">?</span>
+            <div class="tooltip-text">Quản lý và tính toán lương chuyến/ngày cho từng lái xe theo tuyến, theo tháng</div>
+        </div>
+    </div>
+</div>
+
+<!-- Bộ lọc và nút xuất Excel trong 1 hàng -->
+<div class="filter-section">
+    <form method="GET" action="/salary-calculation" class="filter-form">
+        <div class="filter-row">
+            <div class="form-group">
+                <label for="selected_month">Chọn tháng:</label>
+                <input type="month" 
+                       id="selected_month" 
+                       name="selected_month" 
+                       value="{{ selected_month }}"
+                       onchange="this.form.submit()"
+                       class="form-control">
+            </div>
+            <div class="form-group">
+                <label for="selected_employee">Chọn nhân viên:</label>
+                <select id="selected_employee" 
+                        name="selected_employee" 
+                        onchange="this.form.submit()"
+                        class="form-control">
+                    <option value="all" {% if selected_employee == "all" or not selected_employee %}selected{% endif %}>
+                        Tất cả nhân viên
+                    </option>
+                    {% for employee in employees %}
+                    <option value="{{ employee.id }}" {% if selected_employee == employee.id|string %}selected{% endif %}>
+                        {{ employee.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="selected_route">Chọn mã tuyến:</label>
+                <select id="selected_route" 
+                        name="selected_route" 
+                        onchange="this.form.submit()"
+                        class="form-control">
+                    <option value="all" {% if selected_route == "all" or not selected_route %}selected{% endif %}>
+                        Tất cả tuyến
+                    </option>
+                    {% for route in routes %}
+                    <option value="{{ route.route_code }}" 
+                            {% if selected_route == route.route_code %}selected{% endif %}
+                            title="{{ route.route_code }} - {{ route.route_name }}">
+                        {{ route.route_code }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="selected_vehicle">Chọn biển số xe:</label>
+                <select id="selected_vehicle" 
+                        name="selected_vehicle" 
+                        onchange="this.form.submit()"
+                        class="form-control">
+                    <option value="all" {% if selected_vehicle == "all" or not selected_vehicle %}selected{% endif %}>
+                        Tất cả xe
+                    </option>
+                    {% for vehicle in vehicles %}
+                    <option value="{{ vehicle.license_plate }}" 
+                            {% if selected_vehicle == vehicle.license_plate %}selected{% endif %}>
+                        {{ vehicle.license_plate }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="export-group">
+                <button type="button" onclick="exportToExcel()" class="export-btn">
+                    📊 Xuất Excel
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Thông tin tổng quan dạng 4 thẻ nhỏ -->
+<div class="stats-section">
+    <div class="stat-card">
+        <div class="stat-icon">📅</div>
+        <div class="stat-content">
+            <div class="stat-number">{{ days_in_month }}</div>
+            <div class="stat-label">ngày</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🚚</div>
+        <div class="stat-content">
+            <div class="stat-number">{{ total_trips }}</div>
+            <div class="stat-label">chuyến</div>
+        </div>
+    </div>
+    <div class="stat-card standard-salary">
+        <div class="stat-icon">💰</div>
+        <div class="stat-content">
+            <div class="stat-number">{{ "{:,.0f}".format(total_standard_salary) }}</div>
+            <div class="stat-label">Lương tuyến chuẩn</div>
+        </div>
+    </div>
+    <div class="stat-card tang-cuong-salary">
+        <div class="stat-icon">⚡</div>
+        <div class="stat-content">
+            <div class="stat-number">{{ "{:,.0f}".format(total_tang_cuong_salary) }}</div>
+            <div class="stat-label">Lương tăng cường</div>
+        </div>
+    </div>
+</div>
+
+<!-- Tổng lương -->
+<div class="total-salary-section">
+    <div class="total-salary-card">
+        <div class="total-salary-icon">💎</div>
+        <div class="total-salary-content">
+            <div class="total-salary-label">TỔNG LƯƠNG</div>
+            <div class="total-salary-amount">{{ "{:,.0f}".format(total_salary) }} VNĐ</div>
+        </div>
+    </div>
+</div>
+
+<!-- Bảng dữ liệu -->
+<div class="table-section">
+    {% if salary_data %}
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Họ và tên lái xe</th>
+                    <th>Mã tuyến</th>
+                    <th>Ngày chạy</th>
+                    <th>Biển số xe</th>
+                    <th>Số km</th>
+                    <th>Lương chuyến (XN)</th>
+                    <th>Lương chuyến (XĐT)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in salary_data %}
+                <tr class="{% if item.salary_type == 'tang_cuong' %}tang-cuong-row{% endif %}">
+                    <td>{{ loop.index }}</td>
+                    <td><strong>{{ item.driver_name }}</strong></td>
+                    <td>
+                        <span class="route-code {% if item.salary_type == 'tang_cuong' %}tang-cuong-route{% endif %}">{{ item.route_code }}</span>
+                    </td>
+                    <td>{{ item.date.strftime('%d/%m/%Y') }}</td>
+                    <td>
+                        <span class="license-plate">{{ item.license_plate }}</span>
+                    </td>
+                    <td class="text-center">
+                        {% if item.salary_type == 'tang_cuong' and item.distance_km > 0 %}
+                            <span class="km-amount">{{ "{:,.1f}".format(item.distance_km) }} km</span>
+                        {% else %}
+                            –
+                        {% endif %}
+                    </td>
+                    <td class="text-right salary-amount">
+                        {% if item.vehicle_type == 'Xe Đối tác' %}
+                            –
+                        {% else %}
+                            {% if item.daily_salary > 0 %}
+                                {{ "{:,.0f}".format(item.daily_salary) }} VNĐ
+                            {% else %}
+                                –
+                            {% endif %}
+                        {% endif %}
+                    </td>
+                    <td class="text-right salary-amount">
+                        {% if item.vehicle_type == 'Xe Đối tác' %}
+                            {% if item.daily_salary > 0 %}
+                                {{ "{:,.0f}".format(item.daily_salary) }} VNĐ
+                            {% else %}
+                                –
+                            {% endif %}
+                        {% else %}
+                            –
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="total-row">
+                    <td colspan="6"><strong>TỔNG CỘNG</strong></td>
+                    <td class="text-right"><strong>
+                        {% set total_xn_salary = salary_data | selectattr('vehicle_type', 'ne', 'Xe Đối tác') | sum(attribute='daily_salary') %}
+                        {{ "{:,.0f}".format(total_xn_salary) }} VNĐ
+                    </strong></td>
+                    <td class="text-right"><strong>
+                        {% set total_xdt_salary = salary_data | selectattr('vehicle_type', 'equalto', 'Xe Đối tác') | sum(attribute='daily_salary') %}
+                        {{ "{:,.0f}".format(total_xdt_salary) }} VNĐ
+                    </strong></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% else %}
+    <div class="no-data">
+        <div class="no-data-icon">📊</div>
+        <h3>Không có dữ liệu</h3>
+        <p>Không có chuyến nào được ghi nhận trong tháng {{ selected_month_display }}</p>
+        <p>Vui lòng chọn tháng khác hoặc thêm dữ liệu chuyến hàng ngày.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Công thức tính lương -->
+<div class="formula-section">
+    <div class="formula-card">
+        <h4>🧮 Công thức tính lương</h4>
+        <div class="formula">
+            <div class="formula-standard">
+                <h5>💰 Tuyến thường:</h5>
+                <p><strong>Lương chuyến/ngày = Lương tuyến/tháng ÷ 30</strong></p>
+                <div class="formula-example">
+                    <p><strong>Ví dụ:</strong></p>
+                    <ul>
+                        <li>Lương tuyến/tháng = 2.000.000 VNĐ</li>
+                        <li>Lương chuyến/ngày = 2.000.000 ÷ 30 = 66.666,67 VNĐ</li>
+                        <li>Làm tròn: 67.000 VNĐ</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="formula-tang-cuong">
+                <h5>⚡ Tuyến "Tăng Cường":</h5>
+                <p><strong>Lương chuyến = Số km thực tế × 1,100 VNĐ</strong></p>
+                <div class="formula-example">
+                    <p><strong>Ví dụ:</strong></p>
+                    <ul>
+                        <li>Số km chạy thực tế = 45.5 km</li>
+                        <li>Lương chuyến = 45.5 × 1,100 = 50.050 VNĐ</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <p><em>Lưu ý: Sử dụng chuẩn hóa tháng 30 ngày cho tuyến thường, số km thực tế từ page daily-new cho tuyến Tăng Cường</em></p>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Thanh tiêu đề ngắn gọn */
+.page-header {
+    margin-bottom: 20px;
+}
+
+.header-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header-content h2 {
+    margin: 0;
+    font-size: 1.8em;
+    color: #343a40;
+}
+
+.tooltip-container {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: #6c757d;
+    color: white;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: help;
+    transition: background-color 0.3s ease;
+}
+
+.tooltip-icon:hover {
+    background: #495057;
+}
+
+.tooltip-text {
+    visibility: hidden;
+    width: 300px;
+    background-color: #333;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -150px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.tooltip-text::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+}
+
+.tooltip-container:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Bộ lọc và nút xuất Excel trong 1 hàng */
+.filter-form {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    border: 1px solid #e9ecef;
+}
+
+.filter-row {
+    display: flex;
+    gap: 20px;
+    align-items: end;
+    flex-wrap: wrap;
+}
+
+.filter-form .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-width: 200px;
+}
+
+.filter-form label {
+    font-weight: 600;
+    color: #495057;
+    margin: 0;
+    font-size: 14px;
+}
+
+.filter-form input[type="month"],
+.filter-form select {
+    padding: 10px 12px;
+    border: 2px solid #dee2e6;
+    border-radius: 6px;
+    font-size: 16px;
+    background: white;
+}
+
+.filter-form input[type="month"]:focus,
+.filter-form select:focus {
+    border-color: #007bff;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.filter-form select {
+    cursor: pointer;
+}
+
+.export-group {
+    display: flex;
+    align-items: end;
+}
+
+/* Thông tin tổng quan dạng 4 thẻ nhỏ */
+.stats-section {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 150px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.stat-icon {
+    font-size: 24px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.stat-content {
+    flex: 1;
+}
+
+.stat-number {
+    font-size: 1.4em;
+    font-weight: 700;
+    color: #343a40;
+    line-height: 1.2;
+}
+
+.stat-label {
+    font-size: 0.9em;
+    color: #6c757d;
+    margin-top: 2px;
+}
+
+/* Styling for different salary types */
+.stat-card.standard-salary {
+    border-left: 4px solid #28a745;
+}
+
+.stat-card.tang-cuong-salary {
+    border-left: 4px solid #ffc107;
+}
+
+/* Total salary section */
+.total-salary-section {
+    margin-bottom: 25px;
+}
+
+.total-salary-card {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
+}
+
+.total-salary-icon {
+    font-size: 2.5em;
+    width: 60px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+}
+
+.total-salary-content {
+    flex: 1;
+}
+
+.total-salary-label {
+    font-size: 0.9em;
+    opacity: 0.9;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.total-salary-amount {
+    font-size: 1.8em;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+/* Bảng dữ liệu với header cố định */
+.table-section {
+    margin-bottom: 30px;
+}
+
+.table-responsive {
+    max-height: 70vh;
+    overflow-y: auto;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.export-btn {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.export-btn:hover {
+    background: linear-gradient(135deg, #218838 0%, #1ea085 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+}
+
+.export-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 10px rgba(40, 167, 69, 0.3);
+}
+
+.export-btn:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    position: relative;
+}
+
+.data-table th {
+    background: #343a40;
+    color: white;
+    padding: 15px 12px;
+    text-align: left;
+    font-weight: 600;
+    border: none;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.data-table td {
+    padding: 12px;
+    border-bottom: 1px solid #e9ecef;
+    vertical-align: middle;
+}
+
+.data-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.route-code {
+    font-weight: 600;
+    color: #007bff;
+    font-size: 1.1em;
+}
+
+.license-plate {
+    font-weight: 600;
+    color: #28a745;
+    font-size: 1.1em;
+    background: #f8f9fa;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+}
+
+.text-right {
+    text-align: right;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.salary-amount {
+    font-weight: 600;
+    color: #28a745;
+    font-size: 1.1em;
+}
+
+/* Salary type badges */
+.salary-type-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.standard-badge {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.tang-cuong-badge {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+/* KM amount styling */
+.km-amount {
+    font-weight: 600;
+    color: #ffc107;
+    background: #fff3cd;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #ffeaa7;
+    font-size: 0.9em;
+}
+
+/* Route code styling for Tăng Cường */
+.tang-cuong-route {
+    color: #ffc107 !important;
+    font-weight: 700;
+}
+
+/* Row styling for Tăng Cường */
+.tang-cuong-row {
+    background: rgba(255, 193, 7, 0.05);
+}
+
+.tang-cuong-row:hover {
+    background: rgba(255, 193, 7, 0.1) !important;
+}
+
+.total-row {
+    background: #e9ecef;
+    font-weight: 600;
+}
+
+.total-row td {
+    padding: 15px 12px;
+    border-top: 2px solid #dee2e6;
+}
+
+.no-data {
+    text-align: center;
+    padding: 60px 20px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.no-data-icon {
+    font-size: 4em;
+    margin-bottom: 20px;
+}
+
+.no-data h3 {
+    color: #6c757d;
+    margin-bottom: 15px;
+}
+
+.no-data p {
+    color: #6c757d;
+    margin: 10px 0;
+}
+
+.formula-section {
+    margin-top: 30px;
+}
+
+.formula-card {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 10px;
+    padding: 20px;
+}
+
+.formula-card h4 {
+    color: #856404;
+    margin: 0 0 15px 0;
+}
+
+.formula p {
+    font-size: 1.2em;
+    color: #856404;
+    margin: 10px 0;
+}
+
+.formula-example {
+    margin-top: 15px;
+    padding: 15px;
+    background: white;
+    border-radius: 6px;
+    border-left: 4px solid #ffc107;
+}
+
+.formula-example p {
+    margin: 0 0 10px 0;
+    color: #495057;
+}
+
+.formula-example ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.formula-example li {
+    margin: 5px 0;
+    color: #495057;
+}
+
+/* Formula sections */
+.formula-standard {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #d4edda;
+    border-radius: 8px;
+    border-left: 4px solid #28a745;
+}
+
+.formula-tang-cuong {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #fff3cd;
+    border-radius: 8px;
+    border-left: 4px solid #ffc107;
+}
+
+.formula-standard h5 {
+    color: #155724;
+    margin: 0 0 10px 0;
+    font-size: 1.1em;
+}
+
+.formula-tang-cuong h5 {
+    color: #856404;
+    margin: 0 0 10px 0;
+    font-size: 1.1em;
+}
+
+.formula-standard p {
+    color: #155724;
+    margin: 5px 0;
+}
+
+.formula-tang-cuong p {
+    color: #856404;
+    margin: 5px 0;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .header-content h2 {
+        font-size: 1.5em;
+    }
+    
+    .filter-row {
+        flex-direction: column;
+        gap: 15px;
+        align-items: stretch;
+    }
+    
+    .filter-form .form-group {
+        min-width: auto;
+    }
+    
+    .export-group {
+        align-items: stretch;
+    }
+    
+    .export-btn {
+        width: 100%;
+        justify-content: center;
+        padding: 12px 20px;
+        font-size: 16px;
+    }
+    
+    .stats-section {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .stat-card {
+        min-width: auto;
+        padding: 12px;
+    }
+    
+    .total-salary-card {
+        padding: 15px;
+        gap: 10px;
+    }
+    
+    .total-salary-icon {
+        font-size: 2em;
+        width: 50px;
+        height: 50px;
+    }
+    
+    .total-salary-amount {
+        font-size: 1.5em;
+    }
+    
+    .stat-icon {
+        font-size: 20px;
+        width: 35px;
+        height: 35px;
+    }
+    
+    .stat-number {
+        font-size: 1.2em;
+    }
+    
+    .table-responsive {
+        max-height: 60vh;
+        font-size: 0.9em;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 8px 6px;
+    }
+    
+    .tooltip-text {
+        width: 250px;
+        margin-left: -125px;
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 480px) {
+    .header-content h2 {
+        font-size: 1.3em;
+    }
+    
+    .filter-form {
+        padding: 15px;
+    }
+    
+    .stat-card {
+        padding: 10px;
+        gap: 8px;
+    }
+    
+    .stat-icon {
+        font-size: 18px;
+        width: 30px;
+        height: 30px;
+    }
+    
+    .total-salary-card {
+        padding: 12px;
+        gap: 8px;
+    }
+    
+    .total-salary-icon {
+        font-size: 1.8em;
+        width: 45px;
+        height: 45px;
+    }
+    
+    .total-salary-amount {
+        font-size: 1.3em;
+    }
+    
+    .stat-number {
+        font-size: 1.1em;
+    }
+    
+    .stat-label {
+        font-size: 0.8em;
+    }
+    
+    .table-responsive {
+        font-size: 0.8em;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 6px 4px;
+    }
+    
+    .tooltip-text {
+        width: 200px;
+        margin-left: -100px;
+        font-size: 12px;
+    }
+}
+</style>
+
+<script>
+function exportToExcel() {
+    // Lấy các tham số hiện tại từ URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const selectedMonth = urlParams.get('selected_month') || '{{ selected_month }}';
+    const selectedEmployee = urlParams.get('selected_employee') || '{{ selected_employee }}';
+    const selectedRoute = urlParams.get('selected_route') || '{{ selected_route }}';
+    const selectedVehicle = urlParams.get('selected_vehicle') || '{{ selected_vehicle }}';
+    
+    // Tạo URL xuất Excel
+    let exportUrl = '/salary-calculation/export-excel?';
+    if (selectedMonth) {
+        exportUrl += `selected_month=${selectedMonth}`;
+    }
+    if (selectedEmployee && selectedEmployee !== 'all') {
+        exportUrl += `&selected_employee=${selectedEmployee}`;
+    }
+    if (selectedRoute && selectedRoute !== 'all') {
+        exportUrl += `&selected_route=${selectedRoute}`;
+    }
+    if (selectedVehicle && selectedVehicle !== 'all') {
+        exportUrl += `&selected_vehicle=${selectedVehicle}`;
+    }
+    
+    // Hiển thị loading
+    const btn = document.querySelector('.export-btn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '⏳ Đang xuất...';
+    btn.disabled = true;
+    
+    // Tạo link tải file
+    const link = document.createElement('a');
+    link.href = exportUrl;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    // Khôi phục nút sau 2 giây
+    setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }, 2000);
+}
+</script>
+{% endblock %}

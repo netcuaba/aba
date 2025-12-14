@@ -1,0 +1,570 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý tài khoản - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>👤 Quản lý tài khoản</h2>
+            <p>Quản lý tài khoản người dùng trong hệ thống (Chỉ dành cho Admin)</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-lg" onclick="openAddAccountModal()">
+            <i class="fas fa-user-plus"></i> Thêm tài khoản
+        </button>
+    </div>
+</div>
+
+<!-- Danh sách tài khoản -->
+<div class="table-section">
+    {% if accounts %}
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Username</th>
+                    <th>Password</th>
+                    <th>Phân quyền (Role)</th>
+                    <th>Thao tác</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in accounts %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td><strong>{{ account.username }}</strong></td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="password-display" id="password-{{ account.id }}" data-password="{{ account.password }}">
+                                ********
+                            </span>
+                            <button type="button" class="btn-icon" onclick="togglePassword({{ account.id }})" title="Hiển thị/Ẩn mật khẩu">
+                                <i class="fas fa-eye" id="eye-icon-{{ account.id }}"></i>
+                            </button>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="role-badge role-{{ account.role.lower() }}">
+                            {{ account.role }}
+                        </span>
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteAccount({{ account.id }}, '{{ account.username }}')">
+                            <i class="fas fa-trash"></i> Xóa
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="no-data">
+        <div class="no-data-icon">👤</div>
+        <h3>Chưa có tài khoản nào</h3>
+        <p>Hãy thêm tài khoản đầu tiên bằng nút "Thêm tài khoản" bên trên</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Modal Thêm tài khoản mới -->
+<div id="addAccountModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-user-plus"></i> Thêm tài khoản mới</h3>
+            <span class="close" onclick="closeAddAccountModal()">&times;</span>
+        </div>
+        <form id="addAccountForm">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="username">Username *</label>
+                    <input type="text" id="username" name="username" required placeholder="Nhập tên đăng nhập">
+                    <div class="error-message" id="username-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password *</label>
+                    <input type="password" id="password" name="password" required placeholder="Nhập mật khẩu">
+                    <small class="form-help">
+                        Mật khẩu phải có: ít nhất 8 ký tự, 1 chữ in hoa (A-Z), 1 chữ thường (a-z), 1 chữ số (0-9)
+                    </small>
+                    <div class="error-message" id="password-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="role">Phân quyền (Role) *</label>
+                    <select id="role" name="role" required>
+                        <option value="">-- Chọn phân quyền --</option>
+                        <option value="Admin">Admin</option>
+                        <option value="User">User</option>
+                        <option value="Guest">Guest</option>
+                    </select>
+                    <div class="error-message" id="role-error"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeAddAccountModal()">Hủy</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Lưu
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.page-header {
+    margin-bottom: 30px;
+}
+
+.page-header h2 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+}
+
+.page-header p {
+    color: #7f8c8d;
+    margin: 0;
+}
+
+.btn-lg {
+    padding: 12px 24px;
+    font-size: 16px;
+    border-radius: 8px;
+}
+
+.table-section {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th {
+    background: #34495e;
+    color: white;
+    padding: 15px 12px;
+    text-align: left;
+    font-weight: 600;
+    border: none;
+}
+
+.data-table td {
+    padding: 12px;
+    border-bottom: 1px solid #ecf0f1;
+    vertical-align: middle;
+}
+
+.data-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.password-display {
+    font-family: monospace;
+    font-size: 14px;
+    color: #333;
+    min-width: 100px;
+    display: inline-block;
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #3498db;
+    padding: 4px 8px;
+    font-size: 16px;
+    transition: color 0.2s;
+}
+
+.btn-icon:hover {
+    color: #2980b9;
+}
+
+.role-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.role-admin {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.role-user {
+    background-color: #3498db;
+    color: white;
+}
+
+.role-guest {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.no-data {
+    text-align: center;
+    padding: 60px 20px;
+    color: #7f8c8d;
+}
+
+.no-data-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+}
+
+.no-data h3 {
+    color: #34495e;
+    margin-bottom: 10px;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 5% auto;
+    padding: 0;
+    border: 1px solid #888;
+    width: 90%;
+    max-width: 500px;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    padding: 20px;
+    background: #34495e;
+    color: white;
+    border-radius: 10px 10px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.close {
+    color: white;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover,
+.close:focus {
+    color: #ecf0f1;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.modal-footer {
+    padding: 15px 20px;
+    background: #f8f9fa;
+    border-top: 1px solid #ddd;
+    border-radius: 0 0 10px 10px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.form-help {
+    display: block;
+    margin-top: 5px;
+    font-size: 12px;
+    color: #7f8c8d;
+}
+
+.error-message {
+    color: #e74c3c;
+    font-size: 12px;
+    margin-top: 5px;
+    display: none;
+}
+
+.error-message.show {
+    display: block;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-primary {
+    background-color: #3498db;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+}
+
+.btn-secondary {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #7f8c8d;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+</style>
+
+<script>
+// Toggle hiển thị/ẩn mật khẩu
+function togglePassword(accountId) {
+    const passwordDisplay = document.getElementById(`password-${accountId}`);
+    const eyeIcon = document.getElementById(`eye-icon-${accountId}`);
+    const actualPassword = passwordDisplay.getAttribute('data-password');
+    
+    if (passwordDisplay.textContent === '********') {
+        // Hiển thị mật khẩu
+        passwordDisplay.textContent = actualPassword;
+        eyeIcon.classList.remove('fa-eye');
+        eyeIcon.classList.add('fa-eye-slash');
+    } else {
+        // Ẩn mật khẩu
+        passwordDisplay.textContent = '********';
+        eyeIcon.classList.remove('fa-eye-slash');
+        eyeIcon.classList.add('fa-eye');
+    }
+}
+
+// Mở modal thêm tài khoản
+function openAddAccountModal() {
+    document.getElementById('addAccountModal').style.display = 'block';
+    // Reset form
+    document.getElementById('addAccountForm').reset();
+    // Clear errors
+    document.querySelectorAll('.error-message').forEach(el => {
+        el.classList.remove('show');
+        el.textContent = '';
+    });
+}
+
+// Đóng modal thêm tài khoản
+function closeAddAccountModal() {
+    document.getElementById('addAccountModal').style.display = 'none';
+}
+
+// Validate password policy
+function validatePassword(password) {
+    const errors = [];
+    
+    if (password.length < 8) {
+        errors.push('Mật khẩu phải có ít nhất 8 ký tự');
+    }
+    
+    if (!/[A-Z]/.test(password)) {
+        errors.push('Mật khẩu phải có ít nhất 1 chữ in hoa (A-Z)');
+    }
+    
+    if (!/[a-z]/.test(password)) {
+        errors.push('Mật khẩu phải có ít nhất 1 chữ thường (a-z)');
+    }
+    
+    if (!/[0-9]/.test(password)) {
+        errors.push('Mật khẩu phải có ít nhất 1 chữ số (0-9)');
+    }
+    
+    return errors;
+}
+
+// Xử lý submit form thêm tài khoản
+document.getElementById('addAccountForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    // Clear previous errors
+    document.querySelectorAll('.error-message').forEach(el => {
+        el.classList.remove('show');
+        el.textContent = '';
+    });
+    
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const role = document.getElementById('role').value;
+    
+    let hasError = false;
+    
+    // Validate username
+    if (!username) {
+        const errorEl = document.getElementById('username-error');
+        errorEl.textContent = 'Vui lòng nhập username';
+        errorEl.classList.add('show');
+        hasError = true;
+    }
+    
+    // Validate password
+    if (!password) {
+        const errorEl = document.getElementById('password-error');
+        errorEl.textContent = 'Vui lòng nhập mật khẩu';
+        errorEl.classList.add('show');
+        hasError = true;
+    } else {
+        const passwordErrors = validatePassword(password);
+        if (passwordErrors.length > 0) {
+            const errorEl = document.getElementById('password-error');
+            errorEl.textContent = passwordErrors[0];
+            errorEl.classList.add('show');
+            hasError = true;
+        }
+    }
+    
+    // Validate role
+    if (!role) {
+        const errorEl = document.getElementById('role-error');
+        errorEl.textContent = 'Vui lòng chọn phân quyền';
+        errorEl.classList.add('show');
+        hasError = true;
+    }
+    
+    if (hasError) {
+        return;
+    }
+    
+    // Submit form
+    try {
+        const formData = new FormData();
+        formData.append('username', username);
+        formData.append('password', password);
+        formData.append('role', role);
+        
+        const response = await fetch('/accounts/add', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(result.message);
+            closeAddAccountModal();
+            location.reload();
+        } else {
+            // Hiển thị lỗi từ server
+            if (result.message.includes('username') || result.message.includes('Username')) {
+                const errorEl = document.getElementById('username-error');
+                errorEl.textContent = result.message;
+                errorEl.classList.add('show');
+            } else if (result.message.includes('password') || result.message.includes('Mật khẩu')) {
+                const errorEl = document.getElementById('password-error');
+                errorEl.textContent = result.message;
+                errorEl.classList.add('show');
+            } else {
+                alert(result.message);
+            }
+        }
+    } catch (error) {
+        alert('Có lỗi xảy ra: ' + error.message);
+    }
+});
+
+// Xóa tài khoản
+async function deleteAccount(accountId, username) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa tài khoản "${username}"?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/accounts/delete/${accountId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(result.message);
+            location.reload();
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('Có lỗi xảy ra: ' + error.message);
+    }
+}
+
+// Đóng modal khi click bên ngoài
+window.onclick = function(event) {
+    const modal = document.getElementById('addAccountModal');
+    if (event.target == modal) {
+        closeAddAccountModal();
+    }
+}
+</script>
+{% endblock %}
+

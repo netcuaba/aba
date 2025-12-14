@@ -1,0 +1,25 @@
+1. cài project : 
+D:\> git clone https://github.com/dungnt2508/aba.git
+
+2. giả sử project được cài trên folder : D:\aba
+D:\>cd aba
+
+-- setup environment 
+python -m venv Env3_11
+
+-- start environment :
+D:\aba>Env3_11\Scripts\activate
+-- cài thư viện 
+(Env3_11) D:\aba>pip install -r requirements.txt
+
+--start project
+(Env3_11) D:\aba>python main.py
+
+
+3. push / pull source 
+-- kéo source về : git pull
+
+-- đẩy source 
+git add .
+git commit -m "your_comment"
+git push origin main

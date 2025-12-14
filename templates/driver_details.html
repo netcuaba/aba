@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Chi tiết chuyến - {{ driver_name }} - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 20px;">
+    <a href="/salary" class="btn" style="background: #95a5a6; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+        ← Quay lại trang lương
+    </a>
+</div>
+
+<h2>📋 Chi tiết chuyến của {{ driver_name }}</h2>
+
+<!-- Thông tin tổng quan -->
+<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px; border-radius: 15px; color: white; margin-bottom: 30px;">
+    <h3 style="margin-bottom: 20px;">📊 Thống kê {{ period_text }}</h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+        <div style="text-align: center;">
+            <h4 style="font-size: 2em; margin-bottom: 5px;">{{ total_trips }}</h4>
+            <p>Tổng chuyến</p>
+        </div>
+        <div style="text-align: center;">
+            <h4 style="font-size: 2em; margin-bottom: 5px;">{{ "{:,.1f}".format(total_distance) }}</h4>
+            <p>Tổng km</p>
+        </div>
+        <div style="text-align: center;">
+            <h4 style="font-size: 2em; margin-bottom: 5px;">{{ "{:,.1f}".format(total_cargo) }}</h4>
+            <p>Tổng tải trọng (kg)</p>
+        </div>
+        <div style="text-align: center;">
+            <h4 style="font-size: 2em; margin-bottom: 5px;">{{ routes_used|length }}</h4>
+            <p>Tuyến đã chạy</p>
+        </div>
+    </div>
+</div>
+
+<!-- Các tuyến đã chạy -->
+{% if routes_used %}
+<div style="background: rgba(39, 174, 96, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px; border-left: 4px solid #27ae60;">
+    <h4 style="color: #27ae60; margin-bottom: 15px;">🛣️ Các tuyến đã chạy</h4>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        {% for route in routes_used %}
+        <span style="background: rgba(39, 174, 96, 0.2); color: #27ae60; padding: 8px 15px; border-radius: 20px; font-size: 0.9em; font-weight: 500;">
+            {{ route }}
+        </span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Bảng chi tiết chuyến -->
+{% if daily_routes %}
+<div style="background: rgba(255, 255, 255, 0.9); padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+    <h4 style="color: #2c3e50; margin-bottom: 20px;">📅 Danh sách chuyến chi tiết</h4>
+    
+    <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <thead>
+                <tr style="background: linear-gradient(135deg, #3498db, #2980b9); color: white;">
+                    <th style="padding: 15px; text-align: center; font-weight: 600;">Ngày chạy</th>
+                    <th style="padding: 15px; text-align: center; font-weight: 600;">Mã tuyến</th>
+                    <th style="padding: 15px; text-align: center; font-weight: 600;">Tên tuyến</th>
+                    <th style="padding: 15px; text-align: center; font-weight: 600;">Biển số xe</th>
+                    <th style="padding: 15px; text-align: center; font-weight: 600;">Km</th>
+                    <th style="padding: 15px; text-align: center; font-weight: 600;">Tải trọng (kg)</th>
+                    <th style="padding: 15px; text-align: center; font-weight: 600;">Ghi chú</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trip in daily_routes %}
+                <tr style="border-bottom: 1px solid #ecf0f1; transition: background-color 0.2s;">
+                    <td style="padding: 15px; font-weight: 500; color: #2c3e50;">
+                        <span style="background: rgba(52, 152, 219, 0.1); color: #3498db; padding: 5px 10px; border-radius: 15px; font-size: 0.9em;">
+                            {{ trip.date.strftime('%d/%m/%Y') }}
+                        </span>
+                    </td>
+                    <td style="padding: 15px;">
+                        <span style="background: rgba(39, 174, 96, 0.1); color: #27ae60; padding: 5px 10px; border-radius: 15px; font-size: 0.9em; font-weight: 500;">
+                            {{ trip.route.route_code }}
+                        </span>
+                    </td>
+                    <td style="padding: 15px; color: #2c3e50;">{{ trip.route.route_name }}</td>
+                    <td style="padding: 15px;">
+                        <span style="background: rgba(155, 89, 182, 0.1); color: #9b59b6; padding: 5px 10px; border-radius: 15px; font-size: 0.9em; font-weight: 500;">
+                            {{ trip.license_plate }}
+                        </span>
+                    </td>
+                    <td style="padding: 15px; text-align: right; font-weight: 500; color: #e67e22;">
+                        {{ "{:,.1f}".format(trip.distance_km) }}
+                    </td>
+                    <td style="padding: 15px; text-align: right; font-weight: 500; color: #e67e22;">
+                        {{ "{:,.1f}".format(trip.cargo_weight) }}
+                    </td>
+                    <td style="padding: 15px; color: #7f8c8d; font-style: italic;">
+                        {{ trip.notes or '-' }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot style="background: rgba(52, 73, 94, 0.1); font-weight: bold;">
+                <tr>
+                    <td colspan="4" style="padding: 15px; text-align: right;"><strong>TỔNG CỘNG</strong></td>
+                    <td style="padding: 15px; text-align: right; color: #e67e22;">
+                        <strong>{{ "{:,.1f}".format(total_distance) }}</strong>
+                    </td>
+                    <td style="padding: 15px; text-align: right; color: #e67e22;">
+                        <strong>{{ "{:,.1f}".format(total_cargo) }}</strong>
+                    </td>
+                    <td style="padding: 15px;"></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% else %}
+<div style="text-align: center; padding: 40px; color: #7f8c8d; background: rgba(255, 255, 255, 0.9); border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+    <h3>📅 Chưa có dữ liệu chuyến</h3>
+    <p>Lái xe {{ driver_name }} chưa có chuyến nào được ghi nhận {{ period_text }}</p>
+    <div style="margin-top: 20px;">
+        <a href="/daily" class="btn" style="background: #3498db;">Ghi nhận chuyến</a>
+        <a href="/salary" class="btn" style="background: #95a5a6; margin-left: 10px;">Quay lại</a>
+    </div>
+</div>
+{% endif %}
+
+<!-- Thông tin hướng dẫn - Đã ẩn -->
+<div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
+    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Thông tin chi tiết:</h4>
+    <div style="color: #2c3e50; line-height: 1.6;">
+        <p><strong>Báo cáo chi tiết chuyến vận chuyển của {{ driver_name }}</strong></p>
+        <ul style="margin-top: 10px;">
+            <li><strong>Ngày chạy:</strong> Ngày thực hiện chuyến vận chuyển</li>
+            <li><strong>Mã tuyến:</strong> Mã định danh của tuyến đường</li>
+            <li><strong>Tên tuyến:</strong> Tên mô tả của tuyến đường</li>
+            <li><strong>Biển số xe:</strong> Biển số xe sử dụng cho chuyến</li>
+            <li><strong>Km:</strong> Quãng đường thực tế đã chạy</li>
+            <li><strong>Tải trọng:</strong> Trọng lượng hàng hóa vận chuyển</li>
+        </ul>
+    </div>
+</div>
+
+<!-- Nút in báo cáo -->
+{% if daily_routes %}
+<div style="margin-top: 20px; text-align: center;">
+    <button onclick="window.print()" class="btn" style="background: #27ae60; padding: 12px 24px; font-size: 1.1em;">
+        🖨️ In báo cáo
+    </button>
+</div>
+{% endif %}
+
+<style>
+@media print {
+    .btn, a[href] {
+        display: none !important;
+    }
+    
+    body {
+        background: white !important;
+    }
+    
+    .table, table {
+        box-shadow: none !important;
+        border: 1px solid #ddd !important;
+    }
+    
+    h2, h3, h4 {
+        color: black !important;
+    }
+}
+</style>
+{% endblock %}

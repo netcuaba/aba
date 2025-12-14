@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Hệ thống quản lý vận chuyển{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Hệ thống quản lý vận chuyển</h1>
+            <p>Quản lý nhân viên, tuyến đường và thống kê vận chuyển</p>
+        </div>
+        
+        <nav class="nav">
+            <ul>
+                {% if current_user and current_user.role == "Admin" %}
+                <li><a href="/">Trang chủ</a></li>
+                <li><a href="/employees">Nhân viên</a></li>
+                <li><a href="/vehicles">Xe</a></li>
+                <li><a href="/routes">Tuyến đường</a></li>
+                <li><a href="/daily-new">Bảng chấm công</a></li>
+                <li><a href="/revenue">Doanh thu</a></li>
+                <li><a href="/report">Báo cáo tổng hợp</a></li>
+                <li><a href="/salary-calculation">Bảng tính lương</a></li>
+                <li><a href="/accounts">Account</a></li>
+                {% elif current_user and current_user.role == "User" %}
+                <li><a href="/daily-new">Bảng chấm công</a></li>
+                <li><a href="/revenue">Doanh thu</a></li>
+                {% endif %}
+            </ul>
+            {% if current_user %}
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 15px;">
+                <span style="color: #333; font-size: 14px;">
+                    <i class="fas fa-user"></i> {{ current_user.username }} 
+                    <span style="background: #3498db; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 5px;">
+                        {{ current_user.role }}
+                    </span>
+                </span>
+                <form method="POST" action="/logout" style="margin: 0; display: inline;">
+                    <button type="submit" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                        <i class="fas fa-sign-out-alt"></i> Đăng xuất
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+        </nav>
+        
+        <main class="content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>

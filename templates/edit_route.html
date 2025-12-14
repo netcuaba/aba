@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Sửa tuyến đường - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<h2>Sửa tuyến đường</h2>
+
+<div style="background: white; padding: 20px; border: 1px solid #ddd; margin-bottom: 20px;">
+    <h3 style="margin-bottom: 15px;">Cập nhật thông tin tuyến</h3>
+    <form method="post" action="/routes/edit/{{ route.id }}" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+        <div class="form-group">
+            <label for="route_code">Mã tuyến *</label>
+            <input type="text" id="route_code" name="route_code" required placeholder="VD: NA_002" value="{{ route.route_code }}">
+        </div>
+        <div class="form-group">
+            <label for="route_name">Lộ trình *</label>
+            <input type="text" id="route_name" name="route_name" required placeholder="VD: Kho Trung Chuyển -> Bưu Cục" value="{{ route.route_name }}">
+        </div>
+        <div class="form-group">
+            <label for="distance">Khoảng cách (km)</label>
+            <input type="number" id="distance" name="distance" step="0.1" placeholder="VD: 178" value="{{ route.distance or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="monthly_salary">Lương tuyến/tháng (VNĐ)</label>
+            <input type="number" id="monthly_salary" name="monthly_salary" min="0" placeholder="VD: 10500000" 
+                   value="{{ route.monthly_salary or '' }}" oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help">Nhập số nguyên (ví dụ: 10,500,000 hoặc 10500000)</small>
+        </div>
+        <div class="form-group" style="display: flex; align-items: end; gap: 10px;">
+            <button type="submit" class="btn btn-success">Cập nhật</button>
+            <a href="/routes" class="btn btn-secondary">Hủy</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

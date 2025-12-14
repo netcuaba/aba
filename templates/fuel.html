@@ -1,0 +1,512 @@
+{% extends "base.html" %}
+
+{% block title %}Tổng hợp đổ dầu - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="fuel-page">
+    <div class="page-header">
+        <h2>📊 Tổng hợp đổ dầu</h2>
+        <p>Quản lý lượng dầu theo tháng cho tất cả xe</p>
+    </div>
+
+    <!-- Bộ lọc / Thông tin tổng -->
+    <div class="filter-section">
+        <div class="card">
+            <h3>🔍 Bộ lọc / Thông tin tổng</h3>
+            <form method="GET" action="/fuel" class="filter-form">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label for="from_date">📅 Từ ngày:</label>
+                        <input type="date" id="from_date" name="from_date" value="{{ from_date or '' }}" 
+                               title="Chọn ngày bắt đầu để lọc dữ liệu">
+                    </div>
+                    <div class="filter-group">
+                        <label for="to_date">📅 Đến ngày:</label>
+                        <input type="date" id="to_date" name="to_date" value="{{ to_date or '' }}"
+                               title="Chọn ngày kết thúc để lọc dữ liệu">
+                    </div>
+                    <div class="filter-group">
+                        <button type="submit" class="btn btn-primary">🔍 Lọc dữ liệu</button>
+                        <a href="/fuel" class="btn btn-secondary">📋 Xem tất cả</a>
+                    </div>
+                </div>
+                <div class="filter-info">
+                    <small>💡 <strong>Hướng dẫn:</strong> Chọn khoảng thời gian để xem và xuất báo cáo đổ dầu theo từng giai đoạn cụ thể.</small>
+                </div>
+            </form>
+            
+            <div class="summary-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Tổng số lít dầu đã đổ:</span>
+                    <span class="stat-value">{{ "%.3f"|format(total_liters_pumped) }} lít</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Tổng số bản ghi:</span>
+                    <span class="stat-value">{{ total_records }} bản ghi</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form thêm bản ghi mới -->
+    <div class="add-section">
+        <div class="card">
+            <h3>➕ Thêm bản ghi đổ dầu mới</h3>
+            <form method="POST" action="/fuel/add" class="fuel-form">
+                <input type="hidden" name="from_date" value="{{ from_date or '' }}">
+                <input type="hidden" name="to_date" value="{{ to_date or '' }}">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="date">Ngày đổ dầu:</label>
+                        <input type="date" id="date" name="date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="fuel_type">Loại dầu:</label>
+                        <select id="fuel_type" name="fuel_type">
+                            <option value="Dầu DO 0,05S-II" selected>Dầu DO 0,05S-II</option>
+                            <!-- Có thể thêm các loại dầu khác sau này -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="license_plate">Biển số xe:</label>
+                        <select id="license_plate" name="license_plate" required>
+                            <option value="">-- Chọn xe --</option>
+                            {% for vehicle in vehicles %}
+                            <option value="{{ vehicle.license_plate }}">{{ vehicle.license_plate }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="fuel_price_per_liter">Giá xăng dầu hôm nay (đồng/lít):</label>
+                        <input type="number" id="fuel_price_per_liter" name="fuel_price_per_liter" step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label for="liters_pumped">Số lít dầu đã đổ:</label>
+                        <input type="number" id="liters_pumped" name="liters_pumped" step="0.001" min="0" placeholder="0.000">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="cost_pumped">Số tiền dầu đã đổ (VNĐ):</label>
+                        <input type="number" id="cost_pumped" name="cost_pumped" step="0.01" min="0" placeholder="0.00" readonly>
+                        <small class="form-help">Tự động tính: Giá xăng dầu × Số lít dầu đã đổ</small>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <label for="notes">Ghi chú:</label>
+                        <textarea id="notes" name="notes" rows="2" placeholder="Ghi chú thêm..."></textarea>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">Thêm bản ghi</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bảng chi tiết từng xe -->
+    <div class="data-section">
+        <div class="card">
+            <div class="section-header">
+                <h3>📋 Bảng chi tiết từng xe</h3>
+                <div class="export-actions">
+                    <a href="/fuel/download-template" 
+                       class="btn btn-info"
+                       title="Tải mẫu Excel để import dữ liệu">
+                        📥 Tải mẫu
+                    </a>
+                    <button type="button" class="btn btn-warning" onclick="document.getElementById('importFile').click()"
+                            title="Import dữ liệu từ file Excel">
+                        📤 Import dữ liệu
+                    </button>
+                    <input type="file" id="importFile" accept=".xlsx,.xls" style="display: none;" onchange="importExcel()">
+                    <a href="/fuel-report/export-excel?from_date={{ from_date or '' }}&to_date={{ to_date or '' }}" 
+                       class="btn btn-success"
+                       title="Xuất Excel theo dữ liệu đã lọc">
+                        📊 Xuất Excel
+                    </a>
+                </div>
+            </div>
+            
+            {% if from_date and to_date %}
+            <div class="filter-status">
+                <p><strong>📅 Đang hiển thị:</strong> Từ ngày {{ from_date }} đến ngày {{ to_date }}</p>
+            </div>
+            {% elif from_date %}
+            <div class="filter-status">
+                <p><strong>📅 Đang hiển thị:</strong> Từ ngày {{ from_date }}</p>
+            </div>
+            {% elif to_date %}
+            <div class="filter-status">
+                <p><strong>📅 Đang hiển thị:</strong> Đến ngày {{ to_date }}</p>
+            </div>
+            {% else %}
+            <div class="filter-status">
+                <p><strong>📅 Đang hiển thị:</strong> Tháng hiện tại</p>
+            </div>
+            {% endif %}
+            
+            {% if fuel_records %}
+            <div class="table-responsive">
+                <table class="fuel-table">
+                    <thead>
+                        <tr>
+                            <th>STT</th>
+                            <th>Ngày đổ</th>
+                            <th>Loại dầu</th>
+                            <th>Biển số xe</th>
+                            <th>Giá xăng dầu (đồng/lít)</th>
+                            <th>Số lít đã đổ</th>
+                            <th>Số tiền đã đổ</th>
+                            <th>Ghi chú</th>
+                            <th>Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for record in fuel_records %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
+                            <td>{{ record.fuel_type }}</td>
+                            <td><strong>{{ record.license_plate }}</strong></td>
+                            <td class="number">{{ "{:,.2f}".format(record.fuel_price_per_liter) }}</td>
+                            <td class="number">{{ "%.3f"|format(record.liters_pumped) }}</td>
+                            <td class="number">{{ "{:,.0f}".format(record.cost_pumped) }}</td>
+                            <td class="notes">{{ record.notes or '' }}</td>
+                            <td class="actions">
+                                <a href="/fuel/edit/{{ record.id }}" class="btn btn-sm btn-warning">Sửa</a>
+                                <form method="POST" action="/fuel/delete/{{ record.id }}" style="display: inline;" 
+                                      onsubmit="return confirm('Bạn có chắc chắn muốn xóa bản ghi này?')">
+                                    <button type="submit" class="btn btn-sm btn-danger">Xóa</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="summary-row">
+                            <td colspan="4"><strong>TỔNG CỘNG</strong></td>
+                            <td class="number"><strong>-</strong></td>
+                            <td class="number"><strong>{{ "%.3f"|format(fuel_records | sum(attribute='liters_pumped')) }}</strong></td>
+                            <td class="number"><strong>{{ "{:,.0f}".format(fuel_records | sum(attribute='cost_pumped')) }}</strong></td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% else %}
+            <div class="no-data">
+                <p>Không có dữ liệu đổ dầu nào trong khoảng thời gian đã chọn.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Thông tin hướng dẫn - Đã ẩn -->
+    <div class="info-section" style="display: none;">
+        <div class="card">
+            <h3>ℹ️ Hướng dẫn sử dụng</h3>
+            <div class="guide-sections">
+                <div class="guide-section">
+                    <h4>🔍 Bộ lọc và xuất báo cáo</h4>
+                    <ul>
+                        <li><strong>Lọc theo ngày:</strong> Chọn "Từ ngày" và "Đến ngày" để xem dữ liệu trong khoảng thời gian cụ thể</li>
+                        <li><strong>Tải mẫu:</strong> Nhấn "Tải mẫu" để tải file Excel mẫu để import dữ liệu</li>
+                        <li><strong>Import dữ liệu:</strong> Nhấn "Import dữ liệu" để upload file Excel theo đúng mẫu</li>
+                        <li><strong>Xuất Excel:</strong> Nút "Xuất Excel" sẽ xuất đúng dữ liệu đang hiển thị trên bảng (đã áp dụng bộ lọc)</li>
+                        <li><strong>Xem tất cả:</strong> Nhấn "Xem tất cả" để hiển thị dữ liệu tháng hiện tại</li>
+                    </ul>
+                </div>
+                
+                <div class="guide-section">
+                    <h4>📤 Import dữ liệu Excel</h4>
+                    <ul>
+                        <li><strong>Định dạng file:</strong> Chỉ chấp nhận .xlsx hoặc .xls</li>
+                        <li><strong>Thứ tự cột:</strong> STT | Ngày đổ dầu (dd/mm/yyyy) | Biển số xe | Số lượng dầu đổ | Đơn giá | Thành tiền</li>
+                        <li><strong>Biển số xe:</strong> Phải khớp với danh sách xe trong hệ thống</li>
+                        <li><strong>Số lượng dầu:</strong> Cho phép 3 chữ số thập phân (ví dụ: 50.000)</li>
+                        <li><strong>Thành tiền:</strong> Có thể để trống, hệ thống sẽ tự tính</li>
+                        <li><strong>Validation:</strong> Hệ thống kiểm tra và báo lỗi chi tiết cho từng dòng</li>
+                    </ul>
+                </div>
+                
+                <div class="guide-section">
+                    <h4>💰 Tính toán chi phí</h4>
+                    <ul>
+                        <li><strong>Số tiền dầu đã đổ</strong> = Giá xăng dầu hôm nay × Số lít dầu đã đổ (làm tròn đến đồng)</li>
+                        <li>Hệ thống tự động tính toán số tiền dầu đã đổ khi bạn nhập giá xăng dầu và số lít</li>
+                        <li>Số lít dầu có thể nhập chính xác đến 3 chữ số thập phân (ví dụ: 66.428 lít)</li>
+                        <li>Giá xăng dầu có thể nhập chính xác đến từng đơn vị (ví dụ: 19,020 đồng/lít)</li>
+                        <li>Số tiền được làm tròn đến đơn vị đồng để dễ hạch toán</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal hiển thị chi tiết lỗi import -->
+<div id="importErrorModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>⚠️ Chi tiết lỗi Import</h3>
+            <span class="close" onclick="closeImportErrorModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="importSummary" class="import-summary"></div>
+            <div id="importErrors" class="import-errors"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-primary" onclick="closeImportErrorModal()">Đóng</button>
+            <button type="button" class="btn btn-info" onclick="downloadErrorLog()">📥 Tải log lỗi</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// Thiết lập ngày mặc định là hôm nay
+document.addEventListener('DOMContentLoaded', function() {
+    const dateInput = document.getElementById('date');
+    if (dateInput && !dateInput.value) {
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.value = today;
+    }
+});
+
+// Tính toán tự động khi nhập dữ liệu
+document.addEventListener('input', function(e) {
+    if (e.target.id === 'fuel_price_per_liter' || e.target.id === 'liters_pumped') {
+        const fuelPrice = parseFloat(document.getElementById('fuel_price_per_liter').value) || 0;
+        const litersPumped = parseFloat(document.getElementById('liters_pumped').value) || 0;
+        const costPumped = fuelPrice * litersPumped;
+        
+        const costPumpedInput = document.getElementById('cost_pumped');
+        if (costPumpedInput) {
+            // Làm tròn đến đơn vị đồng (0 chữ số thập phân)
+            costPumpedInput.value = Math.round(costPumped).toFixed(0);
+        }
+    }
+});
+
+// Xử lý import Excel
+function importExcel() {
+    const fileInput = document.getElementById('importFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        return;
+    }
+    
+    // Kiểm tra định dạng file
+    const allowedTypes = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+        'application/vnd.ms-excel' // .xls
+    ];
+    
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
+        alert('❌ Chỉ chấp nhận file Excel (.xlsx hoặc .xls)');
+        fileInput.value = '';
+        return;
+    }
+    
+    // Hiển thị loading
+    const importBtn = document.querySelector('button[onclick*="importFile"]');
+    const originalText = importBtn.innerHTML;
+    importBtn.innerHTML = '⏳ Đang xử lý...';
+    importBtn.disabled = true;
+    
+    // Tạo FormData để upload
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // Gửi request
+    fetch('/fuel/import-excel', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            if (data.errors && data.errors.length > 0) {
+                // Hiển thị modal với chi tiết lỗi
+                showImportErrorModal(data);
+            } else {
+                // Không có lỗi, hiển thị thông báo thành công đơn giản
+                alert(`✅ Import thành công!\n\n📊 Tổng kết:\n- Đã import: ${data.imported_count} bản ghi\n- Tỷ lệ thành công: ${data.summary.success_rate}`);
+                window.location.reload();
+            }
+        } else {
+            // Lỗi hệ thống
+            let errorMessage = `❌ Import thất bại!\n\nLỗi: ${data.error}`;
+            
+            if (data.details) {
+                errorMessage += `\nChi tiết: ${data.details}`;
+            }
+            
+            if (data.suggestion) {
+                errorMessage += `\n\n💡 Gợi ý: ${data.suggestion}`;
+            }
+            
+            alert(errorMessage);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('❌ Có lỗi xảy ra khi import file. Vui lòng thử lại.');
+    })
+    .finally(() => {
+        // Khôi phục nút
+        importBtn.innerHTML = originalText;
+        importBtn.disabled = false;
+        fileInput.value = '';
+    });
+}
+
+// Hiển thị modal chi tiết lỗi import
+function showImportErrorModal(data) {
+    const modal = document.getElementById('importErrorModal');
+    const summaryDiv = document.getElementById('importSummary');
+    const errorsDiv = document.getElementById('importErrors');
+    
+    // Tạo summary
+    summaryDiv.innerHTML = `
+        <div class="summary-card">
+            <h4>📊 Tổng kết Import</h4>
+            <div class="summary-stats">
+                <div class="stat-item">
+                    <span class="stat-label">✅ Đã import:</span>
+                    <span class="stat-value success">${data.imported_count} bản ghi</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">❌ Bỏ qua:</span>
+                    <span class="stat-value error">${data.skipped_count} bản ghi</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">📈 Tỷ lệ thành công:</span>
+                    <span class="stat-value">${data.summary.success_rate}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">📋 Tổng dòng xử lý:</span>
+                    <span class="stat-value">${data.summary.total_rows_processed} dòng</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Tạo danh sách lỗi
+    let errorsHtml = '<div class="errors-list">';
+    errorsHtml += '<h4>⚠️ Chi tiết lỗi</h4>';
+    
+    data.errors.forEach((error, index) => {
+        errorsHtml += `
+            <div class="error-item">
+                <div class="error-header">
+                    <span class="error-row">Dòng ${error.row}</span>
+                </div>
+                <div class="error-details">
+        `;
+        
+        error.errors.forEach(err => {
+            errorsHtml += `
+                <div class="error-detail">
+                    <div class="error-info">
+                        <span class="error-column">${err.column}</span>
+                        <span class="error-message">${err.error}</span>
+                    </div>
+                    <div class="error-value">Giá trị: "${err.value}"</div>
+                    <div class="error-suggestion">💡 ${err.suggestion}</div>
+                </div>
+            `;
+        });
+        
+        errorsHtml += `
+                </div>
+            </div>
+        `;
+    });
+    
+    if (data.has_more_errors) {
+        errorsHtml += `<div class="more-errors">... và ${data.remaining_errors} lỗi khác</div>`;
+    }
+    
+    errorsHtml += '</div>';
+    errorsDiv.innerHTML = errorsHtml;
+    
+    // Lưu data để tải log
+    window.importErrorData = data;
+    
+    // Hiển thị modal
+    modal.style.display = 'block';
+}
+
+// Đóng modal
+function closeImportErrorModal() {
+    document.getElementById('importErrorModal').style.display = 'none';
+    // Reload trang để hiển thị dữ liệu mới
+    window.location.reload();
+}
+
+// Tải log lỗi
+function downloadErrorLog() {
+    if (!window.importErrorData) return;
+    
+    const data = window.importErrorData;
+    let logContent = `BÁO CÁO LỖI IMPORT DỮ LIỆU ĐỔ DẦU\n`;
+    logContent += `Thời gian: ${new Date().toLocaleString('vi-VN')}\n`;
+    logContent += `=====================================\n\n`;
+    
+    logContent += `TỔNG KẾT:\n`;
+    logContent += `- Đã import: ${data.imported_count} bản ghi\n`;
+    logContent += `- Bỏ qua: ${data.skipped_count} bản ghi\n`;
+    logContent += `- Tỷ lệ thành công: ${data.summary.success_rate}\n`;
+    logContent += `- Tổng dòng xử lý: ${data.summary.total_rows_processed} dòng\n\n`;
+    
+    if (data.error_summary) {
+        logContent += `PHÂN LOẠI LỖI:\n`;
+        logContent += `- Lỗi validation: ${data.error_summary.validation_errors}\n`;
+        logContent += `- Lỗi trùng lặp: ${data.error_summary.duplicate_errors}\n`;
+        logContent += `- Lỗi kỹ thuật: ${data.error_summary.technical_errors}\n\n`;
+    }
+    
+    logContent += `CHI TIẾT LỖI:\n`;
+    logContent += `=====================================\n`;
+    
+    data.errors.forEach((error, index) => {
+        logContent += `\n${index + 1}. DÒNG ${error.row}:\n`;
+        error.errors.forEach(err => {
+            logContent += `   - Cột: ${err.column}\n`;
+            logContent += `   - Lỗi: ${err.error}\n`;
+            logContent += `   - Giá trị: "${err.value}"\n`;
+            logContent += `   - Gợi ý: ${err.suggestion}\n\n`;
+        });
+    });
+    
+    // Tạo và tải file
+    const blob = new Blob([logContent], { type: 'text/plain;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `import_error_log_${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
+// Đóng modal khi click bên ngoài
+window.onclick = function(event) {
+    const modal = document.getElementById('importErrorModal');
+    if (event.target === modal) {
+        closeImportErrorModal();
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+
+{% block title %}Sửa xe - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<h2>✏️ Sửa thông tin xe</h2>
+
+<div style="background: white; padding: 20px; border: 1px solid #ddd; margin-bottom: 20px; border-radius: 10px;">
+    <h3 style="margin-bottom: 15px;">Cập nhật thông tin xe</h3>
+    <form method="post" action="/vehicles/edit/{{ vehicle.id }}" enctype="multipart/form-data" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+        <div class="form-group">
+            <label for="license_plate">Biển số xe *</label>
+            <input type="text" id="license_plate" name="license_plate" required placeholder="VD: 50H-448.42" value="{{ vehicle.license_plate }}">
+        </div>
+        <div class="form-group">
+            <label for="vehicle_type">Loại xe *</label>
+            <select id="vehicle_type" name="vehicle_type" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <option value="Xe Nhà" {% if vehicle.vehicle_type == 'Xe Nhà' or not vehicle.vehicle_type %}selected{% endif %}>Xe Nhà</option>
+                <option value="Xe Đối tác" {% if vehicle.vehicle_type == 'Xe Đối tác' %}selected{% endif %}>Xe Đối tác</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="capacity">Tải trọng (kg) *</label>
+            <input type="number" id="capacity" name="capacity" step="100" required placeholder="VD: 5000" value="{{ vehicle.capacity or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="fuel_consumption">Định mức nhiên liệu (l/100km)</label>
+            <input type="number" id="fuel_consumption" name="fuel_consumption" step="0.1" placeholder="VD: 25.5" value="{{ vehicle.fuel_consumption or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="inspection_expiry">Ngày hết hạn đăng kiểm</label>
+            <input type="date" id="inspection_expiry" name="inspection_expiry" value="{{ vehicle.inspection_expiry.strftime('%Y-%m-%d') if vehicle.inspection_expiry else '' }}">
+        </div>
+        <div class="form-group">
+            <label for="inspection_documents">Upload thêm sổ đăng kiểm</label>
+            <input type="file" id="inspection_documents" name="inspection_documents" multiple accept=".pdf,.jpg,.jpeg,.png,.gif">
+            <small style="color: #7f8c8d;">Có thể chọn nhiều ảnh (PDF, JPG, PNG, GIF)</small>
+        </div>
+        <div class="form-group">
+            <label for="phu_hieu_expired_date">Ngày hết hạn phù hiệu vận tải</label>
+            <input type="date" id="phu_hieu_expired_date" name="phu_hieu_expired_date" value="{{ vehicle.phu_hieu_expired_date.strftime('%Y-%m-%d') if vehicle.phu_hieu_expired_date else '' }}">
+        </div>
+        <div class="form-group">
+            <label for="phu_hieu_files">Upload thêm phù hiệu vận tải</label>
+            <input type="file" id="phu_hieu_files" name="phu_hieu_files" multiple accept=".pdf,.jpg,.jpeg,.png,.gif">
+            <small style="color: #7f8c8d;">Có thể chọn nhiều ảnh (PDF, JPG, PNG, GIF)</small>
+        </div>
+        
+        <!-- Hiển thị sổ đăng kiểm hiện có -->
+        {% if vehicle.inspection_documents %}
+        <div class="form-group" style="grid-column: 1 / -1;">
+            <label>Sổ đăng kiểm hiện có:</label>
+            <div id="currentDocuments" style="margin-top: 10px;">
+                <!-- Nội dung sẽ được load bằng JavaScript -->
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Hiển thị phù hiệu vận tải hiện có -->
+        {% if vehicle.phu_hieu_files %}
+        <div class="form-group" style="grid-column: 1 / -1;">
+            <label>Phù hiệu vận tải hiện có:</label>
+            <div id="currentPhuHieuDocuments" style="margin-top: 10px;">
+                <!-- Nội dung sẽ được load bằng JavaScript -->
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="form-group" style="display: flex; align-items: end; gap: 10px; grid-column: 1 / -1;">
+            <button type="submit" class="btn btn-success">Cập nhật</button>
+            <a href="/vehicles" class="btn btn-secondary">Hủy</a>
+        </div>
+    </form>
+</div>
+
+<style>
+.document-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    background: #f8f9fa;
+}
+
+.document-item img {
+    max-width: 60px;
+    max-height: 60px;
+    object-fit: cover;
+    border-radius: 5px;
+}
+
+.document-info {
+    flex: 1;
+}
+
+.document-actions {
+    display: flex;
+    gap: 5px;
+}
+</style>
+
+<script>
+// Load sổ đăng kiểm hiện có khi trang load
+document.addEventListener('DOMContentLoaded', function() {
+    {% if vehicle.inspection_documents %}
+    loadCurrentDocuments({{ vehicle.id }});
+    {% endif %}
+    {% if vehicle.phu_hieu_files %}
+    loadCurrentPhuHieuDocuments({{ vehicle.id }});
+    {% endif %}
+});
+
+async function loadCurrentDocuments(vehicleId) {
+    try {
+        const response = await fetch(`/vehicles/documents/${vehicleId}`);
+        const data = await response.json();
+        
+        const container = document.getElementById('currentDocuments');
+        
+        if (data.success && data.documents.length > 0) {
+            let html = '<div class="documents-list">';
+            
+            data.documents.forEach(doc => {
+                if (doc.exists) {
+                    html += `
+                        <div class="document-item">
+                            ${doc.extension === '.pdf' ? 
+                                `<div style="width: 60px; height: 60px; background: #e9ecef; display: flex; align-items: center; justify-content: center; border-radius: 5px;">
+                                    <span style="font-size: 20px;">📄</span>
+                                </div>` :
+                                `<img src="${doc.url}" alt="${doc.filename}" onerror="this.style.display='none'">`
+                            }
+                            <div class="document-info">
+                                <strong>${doc.filename}</strong><br>
+                                <small>Kích thước: ${(doc.size / 1024).toFixed(1)} KB</small>
+                            </div>
+                            <div class="document-actions">
+                                <a href="${doc.url}" target="_blank" class="btn btn-sm btn-primary">Xem</a>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteDocument(${vehicleId}, '${doc.filename}')">Xóa</button>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        } else {
+            container.innerHTML = '<p style="color: #7f8c8d;">Chưa có sổ đăng kiểm nào</p>';
+        }
+    } catch (error) {
+        console.error('Lỗi khi tải sổ đăng kiểm:', error);
+        document.getElementById('currentDocuments').innerHTML = '<p style="color: #e74c3c;">Lỗi khi tải sổ đăng kiểm</p>';
+    }
+}
+
+async function loadCurrentPhuHieuDocuments(vehicleId) {
+    try {
+        const response = await fetch(`/vehicles/phu-hieu-documents/${vehicleId}`);
+        const data = await response.json();
+        
+        const container = document.getElementById('currentPhuHieuDocuments');
+        
+        if (data.success && data.documents.length > 0) {
+            let html = '<div class="documents-list">';
+            
+            data.documents.forEach(doc => {
+                if (doc.exists) {
+                    html += `
+                        <div class="document-item">
+                            ${doc.extension === '.pdf' ? 
+                                `<div style="width: 60px; height: 60px; background: #e9ecef; display: flex; align-items: center; justify-content: center; border-radius: 5px;">
+                                    <span style="font-size: 20px;">📄</span>
+                                </div>` :
+                                `<img src="${doc.url}" alt="${doc.filename}" onerror="this.style.display='none'">`
+                            }
+                            <div class="document-info">
+                                <strong>${doc.filename}</strong><br>
+                                <small>Kích thước: ${(doc.size / 1024).toFixed(1)} KB</small>
+                            </div>
+                            <div class="document-actions">
+                                <a href="${doc.url}" target="_blank" class="btn btn-sm btn-primary">Xem</a>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deletePhuHieuDocument(${vehicleId}, '${doc.filename}')">Xóa</button>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        } else {
+            container.innerHTML = '<p style="color: #7f8c8d;">Chưa có phù hiệu vận tải nào</p>';
+        }
+    } catch (error) {
+        console.error('Lỗi khi tải phù hiệu vận tải:', error);
+        document.getElementById('currentPhuHieuDocuments').innerHTML = '<p style="color: #e74c3c;">Lỗi khi tải phù hiệu vận tải</p>';
+    }
+}
+
+// Xóa sổ đăng kiểm
+async function deleteDocument(vehicleId, filename) {
+    if (!confirm('Bạn có chắc chắn muốn xóa file này?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/vehicles/documents/${vehicleId}?filename=${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('Xóa file thành công');
+            // Reload danh sách sổ đăng kiểm
+            loadCurrentDocuments(vehicleId);
+        } else {
+            alert('Lỗi: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Lỗi khi xóa file:', error);
+        alert('Có lỗi xảy ra khi xóa file');
+    }
+}
+
+// Xóa phù hiệu vận tải
+async function deletePhuHieuDocument(vehicleId, filename) {
+    if (!confirm('Bạn có chắc chắn muốn xóa file này?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/vehicles/phu-hieu-documents/${vehicleId}?filename=${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('Xóa file thành công');
+            // Reload danh sách phù hiệu vận tải
+            loadCurrentPhuHieuDocuments(vehicleId);
+        } else {
+            alert('Lỗi: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Lỗi khi xóa file:', error);
+        alert('Có lỗi xảy ra khi xóa file');
+    }
+}
+</script>
+{% endblock %}

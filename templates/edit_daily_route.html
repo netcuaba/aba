@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Sửa chuyến - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 20px;">
+    <a href="/daily-new?selected_date={{ daily_route.date.strftime('%Y-%m-%d') }}" class="btn" style="background: #95a5a6; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+        ← Quay lại
+    </a>
+</div>
+
+<h2>✏️ Sửa chuyến</h2>
+
+<!-- Thông tin chuyến hiện tại -->
+<div style="background: rgba(52, 152, 219, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px; border-left: 4px solid #3498db;">
+    <h4 style="color: #3498db; margin-bottom: 15px;">📋 Thông tin chuyến hiện tại</h4>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div>
+            <strong>Mã tuyến:</strong><br>
+            <span style="background: rgba(39, 174, 96, 0.1); color: #27ae60; padding: 5px 10px; border-radius: 15px; font-size: 0.9em;">
+                {{ daily_route.route.route_code }}
+            </span>
+        </div>
+        <div>
+            <strong>Ngày chạy:</strong><br>
+            <span style="background: rgba(52, 152, 219, 0.1); color: #3498db; padding: 5px 10px; border-radius: 15px; font-size: 0.9em;">
+                {{ daily_route.date.strftime('%d/%m/%Y') }}
+            </span>
+        </div>
+        <div>
+            <strong>Tên tuyến:</strong><br>
+            <span style="color: #2c3e50;">{{ daily_route.route.route_name }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Form sửa chuyến -->
+<div style="background: rgba(255, 255, 255, 0.9); padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+    <h3 style="color: #2c3e50; margin-bottom: 20px;">📝 Chỉnh sửa thông tin chuyến</h3>
+    
+    <form method="post" action="/daily-new/edit/{{ daily_route.id }}">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+            <!-- Số km -->
+            <div class="form-group">
+                <label for="distance_km" style="display: block; margin-bottom: 8px; font-weight: 600; color: #2c3e50;">
+                    Số km thực tế <span style="color: #e74c3c;">*</span>
+                </label>
+                <input type="number" 
+                       id="distance_km" 
+                       name="distance_km" 
+                       value="{{ daily_route.distance_km }}" 
+                       step="0.1" 
+                       min="0"
+                       required
+                       style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.3s;"
+                       onfocus="this.style.borderColor='#3498db'"
+                       onblur="this.style.borderColor='#ddd'">
+                <small style="color: #7f8c8d; font-size: 12px;">Quãng đường thực tế đã chạy trong chuyến</small>
+            </div>
+            
+            <!-- Tên lái xe -->
+            <div class="form-group">
+                <label for="driver_name" style="display: block; margin-bottom: 8px; font-weight: 600; color: #2c3e50;">
+                    Tên lái xe
+                </label>
+                <select id="driver_name" 
+                        name="driver_name" 
+                        style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.3s;"
+                        onfocus="this.style.borderColor='#3498db'"
+                        onblur="this.style.borderColor='#ddd'">
+                    <option value="">-- Chọn lái xe --</option>
+                    {% for employee in employees %}
+                    <option value="{{ employee.name }}" {% if employee.name == daily_route.driver_name %}selected{% endif %}>
+                        {{ employee.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <small style="color: #7f8c8d; font-size: 12px;">Chọn nhân viên thực hiện lái xe</small>
+            </div>
+            
+            <!-- Biển số xe -->
+            <div class="form-group">
+                <label for="license_plate" style="display: block; margin-bottom: 8px; font-weight: 600; color: #2c3e50;">
+                    Biển số xe
+                </label>
+                <select id="license_plate" 
+                        name="license_plate" 
+                        style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.3s;"
+                        onfocus="this.style.borderColor='#3498db'"
+                        onblur="this.style.borderColor='#ddd'">
+                    <option value="">-- Chọn xe --</option>
+                    {% for vehicle in vehicles %}
+                    <option value="{{ vehicle.license_plate }}" {% if vehicle.license_plate == daily_route.license_plate %}selected{% endif %}>
+                        {{ vehicle.license_plate }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <small style="color: #7f8c8d; font-size: 12px;">Chọn xe từ danh sách có sẵn</small>
+            </div>
+            
+            <!-- Trạng thái -->
+            <div class="form-group">
+                <label for="status" style="display: block; margin-bottom: 8px; font-weight: 600; color: #2c3e50;">
+                    Trạng thái
+                </label>
+                <select id="status" 
+                        name="status" 
+                        style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.3s;"
+                        onfocus="this.style.borderColor='#3498db'"
+                        onblur="this.style.borderColor='#ddd'">
+                    <option value="Online" {% if daily_route.status == 'Online' or not daily_route.status %}selected{% endif %}>Online</option>
+                    <option value="OFF" {% if daily_route.status == 'OFF' %}selected{% endif %}>OFF</option>
+                </select>
+                <small style="color: #7f8c8d; font-size: 12px;">Trạng thái hoạt động của chuyến</small>
+            </div>
+            
+            <!-- Ghi chú -->
+            <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="notes" style="display: block; margin-bottom: 8px; font-weight: 600; color: #2c3e50;">
+                    Ghi chú
+                </label>
+                <textarea id="notes" 
+                          name="notes" 
+                          rows="3"
+                          placeholder="Nhập ghi chú bổ sung..."
+                          style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.3s; resize: vertical;"
+                          onfocus="this.style.borderColor='#3498db'"
+                          onblur="this.style.borderColor='#ddd'">{{ daily_route.notes or '' }}</textarea>
+                <small style="color: #7f8c8d; font-size: 12px;">Thông tin bổ sung như sự cố, thay đổi, etc.</small>
+            </div>
+        </div>
+        
+        <!-- Nút thao tác -->
+        <div style="margin-top: 30px; text-align: center; display: flex; gap: 15px; justify-content: center;">
+            <button type="submit" class="btn" style="background: #27ae60; padding: 12px 30px; font-size: 16px; border: none; border-radius: 8px; color: white; cursor: pointer; transition: all 0.3s;"
+                    onmouseover="this.style.background='#229954'; this.style.transform='translateY(-2px)'"
+                    onmouseout="this.style.background='#27ae60'; this.style.transform='translateY(0)'">
+                💾 Lưu thay đổi
+            </button>
+            <a href="/daily-new?selected_date={{ daily_route.date.strftime('%Y-%m-%d') }}" 
+               class="btn" 
+               style="background: #95a5a6; padding: 12px 30px; font-size: 16px; text-decoration: none; border-radius: 8px; color: white; transition: all 0.3s; display: inline-block;"
+               onmouseover="this.style.background='#7f8c8d'; this.style.transform='translateY(-2px)'"
+               onmouseout="this.style.background='#95a5a6'; this.style.transform='translateY(0)'">
+                ❌ Hủy bỏ
+            </a>
+        </div>
+    </form>
+</div>
+
+<!-- Thông tin hướng dẫn - Đã ẩn -->
+<div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
+    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Hướng dẫn chỉnh sửa:</h4>
+    <ul style="color: #2c3e50; line-height: 1.6;">
+        <li><strong>Số km thực tế:</strong> Cập nhật quãng đường thực tế đã chạy (bắt buộc)</li>
+        <li><strong>Tên lái xe:</strong> Thay đổi người lái xe nếu cần thiết</li>
+        <li><strong>Biển số xe:</strong> Thay đổi xe sử dụng cho chuyến</li>
+        <li><strong>Ghi chú:</strong> Cập nhật thông tin bổ sung, sự cố, thay đổi</li>
+    </ul>
+</div>
+
+<style>
+.form-group {
+    margin-bottom: 20px;
+}
+
+.btn {
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+</style>
+{% endblock %}
