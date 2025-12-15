@@ -300,11 +300,18 @@ async def login_page(request: Request):
 @app.post("/login")
 async def login(
     request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
+    username: Optional[str] = Form(None),
+    password: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Xử lý đăng nhập"""
+    """Xử lý đăng nhập. Tránh 422 khi bot/healthcheck gọi POST rỗng."""
+    # Nếu thiếu form data, hiển thị lại form với thông báo
+    if not username or not password:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Vui lòng nhập username và password"
+        })
+    
     # Tìm tài khoản trong database
     account = db.query(Account).filter(Account.username == username).first()
     

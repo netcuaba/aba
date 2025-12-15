@@ -43,12 +43,26 @@ class ASGItoWSGI:
         headers = []
         for key, value in environ.items():
             if key.startswith('HTTP_'):
-                header_name = key[5:].replace('_', '-').title()
+                header_name = key[5:].replace('_', '-').lower()
                 headers.append([header_name.encode(), value.encode()])
+
+        # Các header đặc biệt không có tiền tố HTTP_
+        if 'CONTENT_TYPE' in environ:
+            headers.append([b'content-type', environ['CONTENT_TYPE'].encode()])
+        if 'CONTENT_LENGTH' in environ and environ['CONTENT_LENGTH']:
+            headers.append([b'content-length', environ['CONTENT_LENGTH'].encode()])
         
         # Body
         try:
-            body = environ['wsgi.input'].read()
+            content_length = int(environ.get('CONTENT_LENGTH') or 0)
+        except (ValueError, TypeError):
+            content_length = 0
+
+        try:
+            if content_length > 0:
+                body = environ['wsgi.input'].read(content_length)
+            else:
+                body = environ['wsgi.input'].read()
         except:
             body = b''
         
