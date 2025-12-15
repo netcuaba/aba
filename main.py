@@ -10,6 +10,7 @@ from datetime import datetime, date
 import os
 import io
 import re
+import secrets
 from typing import Optional, Tuple
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -270,10 +271,15 @@ def check_page_access(role: str, page_path: str) -> bool:
 app = FastAPI(title="Hệ thống quản lý vận chuyển")
 
 # Thêm SessionMiddleware để quản lý session
-app.add_middleware(SessionMiddleware, secret_key="your-secret-key-change-in-production")
+# Sử dụng biến môi trường cho secret key, fallback về giá trị mặc định
+import secrets
+SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Sử dụng đường dẫn tuyệt đối để tương thích với PythonAnywhere
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Templates đã được tạo ở trên với custom filters
 
