@@ -1897,7 +1897,13 @@ async def daily_new_page(request: Request, db: Session = Depends(get_db), select
     employees = sorted(employees, key=lambda emp: emp.name.lower() if emp.name else "")
     
     # Lọc chuyến đã ghi nhận theo ngày được chọn
-    daily_routes = db.query(DailyRoute).filter(DailyRoute.date == filter_date).order_by(DailyRoute.created_at.desc()).all()
+    # Sắp xếp theo id tuyến đường để cố định thứ tự hiển thị
+    daily_routes = (
+        db.query(DailyRoute)
+        .filter(DailyRoute.date == filter_date)
+        .order_by(DailyRoute.route_id.asc(), DailyRoute.id.asc())
+        .all()
+    )
     
     # Lấy danh sách route_id đã được chấm công trong ngày này
     completed_route_ids = {daily_route.route_id for daily_route in daily_routes}
