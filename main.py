@@ -1760,8 +1760,13 @@ async def daily_page(request: Request, db: Session = Depends(get_db), selected_d
         print(f"DEBUG: No selected_date, using today")
         filter_date = today
     
-    # Lọc chuyến đã ghi nhận theo ngày được chọn
-    daily_routes = db.query(DailyRoute).filter(DailyRoute.date == filter_date).order_by(DailyRoute.created_at.desc()).all()
+     # Sắp xếp rõ ràng: mới nhất lên đầu, tránh lệch thứ tự giữa local/PythonAnywhere
+    daily_routes = (
+        db.query(DailyRoute)
+        .filter(DailyRoute.date == filter_date)
+        .order_by(DailyRoute.created_at.desc(), DailyRoute.id.desc())
+        .all()
+    )
     
     # Debug: Print to console
     print(f"DEBUG: Routes count: {len(routes)}")
