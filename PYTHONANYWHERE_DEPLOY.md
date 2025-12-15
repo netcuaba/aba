@@ -48,24 +48,34 @@ pip install -r requirements.txt
 
 1. Trong tab **Web**, tìm phần **WSGI configuration file**
 2. Click vào file WSGI (thường là `/var/www/yourusername_pythonanywhere_com_wsgi.py`)
-3. Xóa toàn bộ nội dung và thay thế bằng:
+3. **XÓA TOÀN BỘ** nội dung cũ (thường có `from app import app` - SAI!)
+4. Copy toàn bộ nội dung từ file `pythonanywhere_wsgi_example.py` trong project
+5. **QUAN TRỌNG**: Sửa đường dẫn trong file:
+   - Thay `yourusername` bằng username PythonAnywhere của bạn (ví dụ: `netcuaba`)
+   - Thay `aba-product` bằng tên thư mục project thực tế của bạn
+
+**Code mẫu (nhớ sửa đường dẫn!):**
 
 ```python
 import sys
 import os
 
-# Thêm đường dẫn project
-path = '/home/yourusername/aba-product'  # Thay yourusername bằng username của bạn
-if path not in sys.path:
-    sys.path.insert(0, path)
+# ⚠️ SỬA ĐƯỜNG DẪN NÀY!
+project_path = '/home/netcuaba/aba-product'  # Thay netcuaba và aba-product
 
-# Import WSGI application (đã được wrap bằng Mangum)
+if project_path not in sys.path:
+    sys.path.insert(0, project_path)
+
+os.chdir(project_path)
+
+# Import từ wsgi.py (file này import từ main.py)
 from wsgi import application
 ```
 
 **Lưu ý**: 
-- Thay `yourusername` bằng username PythonAnywhere của bạn và `aba-product` bằng tên thư mục project
-- File `wsgi.py` đã được cấu hình sẵn để convert FastAPI (ASGI) thành WSGI application
+- File `wsgi.py` trong project đã được cấu hình sẵn để convert FastAPI (ASGI) thành WSGI application
+- Đảm bảo đường dẫn `project_path` đúng với thư mục project trên PythonAnywhere
+- Nếu không chắc đường dẫn, vào tab **Files** và xem đường dẫn đầy đủ của thư mục project
 
 ## Bước 5: Cấu hình Static Files
 
