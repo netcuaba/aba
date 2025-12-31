@@ -3,10 +3,54 @@
 {% block title %}Quản lý tuyến đường - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
-<h2>🛣️ Quản lý tuyến đường</h2>
+<div class="page-wrapper">
+<h2 class="page-title">🛣️ Quản lý tuyến đường</h2>
 
-<div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px;">
-    <h3 style="color: #9b59b6; margin-bottom: 15px;">➕ Thêm tuyến mới</h3>
+<!-- Thông báo thành công/lỗi -->
+{% if request.query_params.get('success') == 'price_updated' %}
+<div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #c3e6cb;">
+    <strong>✓ Thành công!</strong> 
+    {% if request.query_params.get('count') %}
+        Đã cập nhật giá cho {{ request.query_params.get('count') }} tuyến.
+    {% else %}
+        Giá tuyến đã được cập nhật.
+    {% endif %}
+</div>
+{% endif %}
+{% if request.query_params.get('success') == 'price_update_edited' %}
+<div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #c3e6cb;">
+    <strong>✓ Thành công!</strong> Bản cập nhật giá tuyến đã được sửa.
+</div>
+{% endif %}
+{% if request.query_params.get('error') %}
+<div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #f5c6cb;">
+    <strong>✗ Lỗi!</strong> 
+    {% if request.query_params.get('error') == 'route_not_found' %}
+        Không tìm thấy tuyến đường.
+    {% elif request.query_params.get('error') == 'invalid_route' %}
+        Không thể cập nhật giá cho tuyến "Tăng Cường".
+    {% elif request.query_params.get('error') == 'invalid_date' %}
+        Ngày áp giá không hợp lệ.
+    {% elif request.query_params.get('error') == 'update_failed' %}
+        Có lỗi xảy ra khi cập nhật giá tuyến. Vui lòng thử lại.
+    {% elif request.query_params.get('error') == 'invalid_data' %}
+        Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.
+    {% elif request.query_params.get('error') == 'no_routes_updated' %}
+        Không có tuyến nào được cập nhật. Vui lòng kiểm tra lại dữ liệu.
+    {% elif request.query_params.get('error') == 'missing_data' %}
+        Thiếu thông tin bắt buộc. Vui lòng kiểm tra lại.
+    {% elif request.query_params.get('error') == 'edit_failed' %}
+        Có lỗi xảy ra khi sửa bản cập nhật giá tuyến. Vui lòng thử lại.
+    {% elif request.query_params.get('error') == 'unauthorized' %}
+        Bạn không có quyền thực hiện thao tác này.
+    {% else %}
+        {{ request.query_params.get('error') }}
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="card" style="padding: 20px; margin-bottom: 30px;">
+    <h3 class="section-title" style="margin-bottom: 15px;">➕ Thêm tuyến mới</h3>
     <form method="post" action="/routes/add" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
         <div class="form-group">
             <label for="route_code">Mã tuyến *</label>
@@ -15,6 +59,33 @@
         <div class="form-group">
             <label for="route_name">Lộ trình *</label>
             <input type="text" id="route_name" name="route_name" required placeholder="VD: Kho Trung Chuyển -> Bưu Cục">
+        </div>
+        <div class="form-group">
+            <label for="route_type">Loại tuyến *</label>
+            <select id="route_type" name="route_type" required onchange="updateUnitPrice()">
+                <option value="">-- Chọn loại tuyến --</option>
+                <option value="Nội thành">Nội thành</option>
+                <option value="Nội Tỉnh">Nội Tỉnh</option>
+                <option value="Liên Tỉnh">Liên Tỉnh</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="unit_price">Đơn giá (VNĐ) *</label>
+            <input type="number" id="unit_price" name="unit_price" min="0" step="0.01" required placeholder="VD: 227273" 
+                   oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help" id="unit_price_help">Nhập đơn giá (ví dụ: 227,273 hoặc 227273)</small>
+        </div>
+        <div class="form-group" id="bridge_fee_group" style="display: none;">
+            <label for="bridge_fee">Phí cầu đường (VNĐ)</label>
+            <input type="number" id="bridge_fee" name="bridge_fee" min="0" step="0.01" placeholder="VD: 50000" 
+                   oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help">Nhập phí cầu đường (không bắt buộc)</small>
+        </div>
+        <div class="form-group" id="loading_fee_group" style="display: none;">
+            <label for="loading_fee">Phí chờ tải (VNĐ)</label>
+            <input type="number" id="loading_fee" name="loading_fee" min="0" step="0.01" placeholder="VD: 30000" 
+                   oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help">Nhập phí chờ tải (không bắt buộc)</small>
         </div>
         <div class="form-group">
             <label for="distance">Khoảng cách (km)</label>
@@ -30,6 +101,43 @@
             <button type="submit" class="btn btn-success">Thêm tuyến</button>
         </div>
     </form>
+    
+    <script>
+    function updateUnitPrice() {
+        const routeType = document.getElementById('route_type').value;
+        const unitPriceInput = document.getElementById('unit_price');
+        const unitPriceHelp = document.getElementById('unit_price_help');
+        const bridgeFeeGroup = document.getElementById('bridge_fee_group');
+        const loadingFeeGroup = document.getElementById('loading_fee_group');
+        
+        if (routeType === 'Nội thành') {
+            // Tự động set giá mặc định cho Nội thành
+            unitPriceInput.value = '227273';
+            unitPriceHelp.textContent = 'Giá mặc định: 227,273 đ/chuyến (có thể chỉnh sửa)';
+            unitPriceInput.readOnly = false; // Cho phép sửa
+            // Ẩn các trường phí cho Nội thành
+            bridgeFeeGroup.style.display = 'none';
+            loadingFeeGroup.style.display = 'none';
+        } else if (routeType === 'Nội Tỉnh' || routeType === 'Liên Tỉnh') {
+            // Xóa giá và yêu cầu nhập thủ công
+            if (!unitPriceInput.value || unitPriceInput.value === '227273') {
+                unitPriceInput.value = '';
+            }
+            unitPriceHelp.textContent = 'Nhập đơn giá bắt buộc (ví dụ: 227,273 hoặc 227273)';
+            unitPriceInput.readOnly = false;
+            unitPriceInput.required = true;
+            // Hiển thị các trường phí cho Nội Tỉnh/Liên Tỉnh
+            bridgeFeeGroup.style.display = 'block';
+            loadingFeeGroup.style.display = 'block';
+        } else {
+            unitPriceInput.value = '';
+            unitPriceHelp.textContent = 'Nhập đơn giá (ví dụ: 227,273 hoặc 227273)';
+            // Ẩn các trường phí khi chưa chọn loại tuyến
+            bridgeFeeGroup.style.display = 'none';
+            loadingFeeGroup.style.display = 'none';
+        }
+    }
+    </script>
 </div>
 
 <h3>📋 Danh sách tuyến đường</h3>
@@ -40,6 +148,8 @@
             <th>STT</th>
             <th style="width: 150px;">Mã tuyến</th>
             <th>Lộ trình</th>
+            <th>Loại tuyến</th>
+            <th>Đơn giá (VNĐ)</th>
             <th>Khoảng cách (KM)</th>
             <th>Lương tuyến/tháng</th>
             <th>Thao tác</th>
@@ -51,6 +161,8 @@
             <td>{{ loop.index }}</td>
             <td style="white-space: nowrap;"><strong>{{ route.route_code }}</strong></td>
             <td>{{ route.route_name }}</td>
+            <td>{{ route.route_type or "-" }}</td>
+            <td class="number">{{ "{:,.0f}".format(route.unit_price) if route.unit_price else "-" }}</td>
             <td>{{ "{:,.0f}".format(route.distance) if route.distance else "-" }}</td>
             <td class="number">{{ "{:,.0f}".format(route.monthly_salary) if route.monthly_salary else "-" }}</td>
             <td>
@@ -72,9 +184,432 @@
 </div>
 {% endif %}
 
+<!-- Button Cập nhật giá tuyến -->
+<div style="margin-top: 30px; margin-bottom: 20px;">
+    <button type="button" class="btn btn-primary" onclick="openUpdatePriceModal()" style="padding: 10px 20px; font-size: 14px;">
+        <i class="fas fa-dollar-sign"></i> Cập nhật giá tuyến
+    </button>
+</div>
+
+<!-- Bảng lịch sử cập nhật giá tuyến -->
+<h3 style="margin-top: 40px; margin-bottom: 20px;">📋 Lịch sử cập nhật giá tuyến</h3>
+{% if price_updates %}
+<table class="table" style="margin-top: 20px;">
+    <thead>
+        <tr>
+            <th style="width: 60px;">STT</th>
+            <th>Tên bản cập nhật</th>
+            <th style="width: 150px;">Ngày áp giá</th>
+            <th style="width: 120px;">Số lượng tuyến</th>
+            <th style="width: 200px;">Thao tác</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for update in price_updates %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td><strong>{{ update.update_name }}</strong></td>
+            <td>{{ update.application_date.strftime("%d/%m/%Y") if update.application_date else "-" }}</td>
+            <td class="number">{{ update.route_count }}</td>
+            <td>
+                <div style="display: flex; gap: 5px;">
+                    <button type="button" class="btn btn-sm btn-info" onclick="viewPriceUpdateDetail('{{ update.update_name }}', '{{ update.application_date.strftime('%Y-%m-%d') if update.application_date else '' }}')" style="padding: 5px 10px; font-size: 12px;">
+                        <i class="fas fa-eye"></i> Xem chi tiết
+                    </button>
+                    <button type="button" class="btn btn-sm btn-warning" onclick="editPriceUpdate('{{ update.update_name }}', '{{ update.application_date.strftime('%Y-%m-%d') if update.application_date else '' }}')" style="padding: 5px 10px; font-size: 12px;">
+                        <i class="fas fa-edit"></i> Sửa
+                    </button>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div style="text-align: center; padding: 40px; color: #7f8c8d;">
+    <h4>📋 Chưa có bản cập nhật giá tuyến nào</h4>
+    <p>Hãy tạo bản cập nhật đầu tiên bằng nút "Cập nhật giá tuyến" bên trên</p>
+</div>
+{% endif %}
+
+<!-- Modal Cập nhật giá tuyến -->
+<div id="updatePriceModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #ddd; background: #9b59b6; color: white;">
+            <h3 style="margin: 0; color: white;">💰 Cập nhật giá tuyến</h3>
+            <span class="close" onclick="closeUpdatePriceModal()" style="color: white; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
+        </div>
+        
+        <!-- Bước 1: Form chọn thông tin bản cập nhật -->
+        <div id="step1Form" style="padding: 20px;">
+            <h4 style="margin-bottom: 20px; color: #9b59b6;">Bước 1 - Chọn thông tin bản cập nhật</h4>
+            <div style="display: grid; gap: 15px;">
+                <div class="form-group">
+                    <label for="price_application_date">Ngày áp giá *</label>
+                    <input type="date" id="price_application_date" required>
+                    <small class="form-help">Chọn ngày áp dụng giá mới</small>
+                </div>
+                <div class="form-group">
+                    <label for="price_update_name">Tên bản cập nhật giá tuyến *</label>
+                    <input type="text" id="price_update_name" required placeholder="VD: Cập nhật bảng giá ngày 18/12/2025">
+                    <small class="form-help">Nhập tên mô tả cho bản cập nhật này</small>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button type="button" class="btn btn-secondary" onclick="closeUpdatePriceModal()" style="padding: 10px 20px;">Hủy</button>
+                <button type="button" class="btn btn-primary" onclick="showStep2()" style="padding: 10px 20px;">Tiếp theo</button>
+            </div>
+        </div>
+        
+        <!-- Bước 2: Bảng cập nhật giá tuyến -->
+        <div id="step2Form" style="display: none; padding: 20px;">
+            <h4 style="margin-bottom: 20px; color: #9b59b6;">Bước 2 - Cập nhật giá tuyến</h4>
+            <form id="updatePriceForm" method="post" action="/routes/update-price" enctype="application/x-www-form-urlencoded">
+                <input type="hidden" id="form_application_date" name="application_date">
+                <input type="hidden" id="form_update_name" name="update_name">
+                
+                <div style="max-height: 500px; overflow-y: auto; margin-bottom: 20px;">
+                    <table class="table" style="width: 100%;">
+                        <thead style="position: sticky; top: 0; background: #9b59b6; color: white; z-index: 10;">
+                            <tr>
+                                <th style="width: 60px;">STT</th>
+                                <th>Mã tuyến</th>
+                                <th style="width: 200px;">Đơn giá (VNĐ) *</th>
+                            </tr>
+                        </thead>
+                        <tbody id="priceTableBody">
+                            {% set route_index = 0 %}
+                            {% for route in routes %}
+                                {% if route.route_code and route.route_code.strip() != "Tăng Cường" %}
+                                {% set route_index = route_index + 1 %}
+                                <tr>
+                                    <td>{{ route_index }}</td>
+                                    <td><strong>{{ route.route_code }}</strong> - {{ route.route_name }}</td>
+                                    <td>
+                                        <input type="hidden" name="route_ids" value="{{ route.id }}">
+                                        <input type="number" 
+                                               name="unit_prices" 
+                                               min="0" 
+                                               step="1" 
+                                               required 
+                                               placeholder="VD: 227273"
+                                               class="price-input"
+                                               oninput="validateInteger(this)" 
+                                               onblur="validateInteger(this)"
+                                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button type="button" class="btn btn-secondary" onclick="backToStep1()" style="padding: 10px 20px;">Quay lại</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeUpdatePriceModal()" style="padding: 10px 20px;">Hủy</button>
+                    <button type="submit" class="btn btn-success" style="padding: 10px 20px;">Lưu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openUpdatePriceModal() {
+    document.getElementById('updatePriceModal').style.display = 'block';
+    // Set ngày mặc định là hôm nay
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('price_application_date').value = today;
+    // Reset form và hiển thị bước 1
+    document.getElementById('step1Form').style.display = 'block';
+    document.getElementById('step2Form').style.display = 'none';
+    document.getElementById('price_application_date').value = today;
+    document.getElementById('price_update_name').value = '';
+    // Reset tất cả input giá trong bảng
+    const priceInputs = document.querySelectorAll('.price-input');
+    priceInputs.forEach(input => input.value = '');
+}
+
+function closeUpdatePriceModal() {
+    document.getElementById('updatePriceModal').style.display = 'none';
+    // Reset form
+    document.getElementById('step1Form').style.display = 'block';
+    document.getElementById('step2Form').style.display = 'none';
+    document.getElementById('price_application_date').value = '';
+    document.getElementById('price_update_name').value = '';
+    const priceInputs = document.querySelectorAll('.price-input');
+    priceInputs.forEach(input => input.value = '');
+}
+
+function showStep2() {
+    // Kiểm tra đã nhập đủ thông tin bước 1
+    const applicationDate = document.getElementById('price_application_date').value;
+    const updateName = document.getElementById('price_update_name').value.trim();
+    
+    if (!applicationDate) {
+        alert('Vui lòng chọn ngày áp giá');
+        return;
+    }
+    
+    if (!updateName) {
+        alert('Vui lòng nhập tên bản cập nhật giá tuyến');
+        return;
+    }
+    
+    // Lưu giá trị vào hidden inputs của form
+    document.getElementById('form_application_date').value = applicationDate;
+    document.getElementById('form_update_name').value = updateName;
+    
+    // Hiển thị bước 2 và ẩn bước 1
+    document.getElementById('step1Form').style.display = 'none';
+    document.getElementById('step2Form').style.display = 'block';
+}
+
+function backToStep1() {
+    document.getElementById('step1Form').style.display = 'block';
+    document.getElementById('step2Form').style.display = 'none';
+}
+
+function validateInteger(input) {
+    // Chỉ cho phép số nguyên, không cho phép số thập phân
+    if (input.value.includes('.')) {
+        input.value = Math.floor(parseFloat(input.value) || 0);
+    }
+    // Đảm bảo giá trị là số nguyên
+    if (input.value && !Number.isInteger(parseFloat(input.value))) {
+        input.value = Math.floor(parseFloat(input.value) || 0);
+    }
+}
+
+// Đóng modal khi click bên ngoài
+window.onclick = function(event) {
+    const modal = document.getElementById('updatePriceModal');
+    if (event.target == modal) {
+        closeUpdatePriceModal();
+    }
+    const detailModal = document.getElementById('priceUpdateDetailModal');
+    if (event.target == detailModal) {
+        closePriceUpdateDetailModal();
+    }
+    const editModal = document.getElementById('priceUpdateEditModal');
+    if (event.target == editModal) {
+        closePriceUpdateEditModal();
+    }
+}
+
+// Xem chi tiết bản cập nhật giá tuyến
+async function viewPriceUpdateDetail(updateName, applicationDate) {
+    try {
+        const response = await fetch(`/routes/price-update-detail?update_name=${encodeURIComponent(updateName)}&application_date=${applicationDate}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            alert('Lỗi khi tải chi tiết: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        
+        // Hiển thị modal chi tiết
+        document.getElementById('detailUpdateName').textContent = data.update_name;
+        document.getElementById('detailApplicationDate').textContent = new Date(data.application_date).toLocaleDateString('vi-VN');
+        
+        // Tạo bảng chi tiết
+        const tbody = document.getElementById('detailTableBody');
+        tbody.innerHTML = '';
+        
+        data.details.forEach((detail, index) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${index + 1}</td>
+                <td><strong>${detail.route_code}</strong> - ${detail.route_name}</td>
+                <td class="number">${detail.unit_price.toLocaleString('vi-VN')}</td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        document.getElementById('priceUpdateDetailModal').style.display = 'block';
+    } catch (error) {
+        console.error('Error loading detail:', error);
+        alert('Lỗi khi tải chi tiết bản cập nhật');
+    }
+}
+
+function closePriceUpdateDetailModal() {
+    document.getElementById('priceUpdateDetailModal').style.display = 'none';
+}
+
+// Sửa bản cập nhật giá tuyến
+async function editPriceUpdate(updateName, applicationDate) {
+    try {
+        const response = await fetch(`/routes/price-update-detail?update_name=${encodeURIComponent(updateName)}&application_date=${applicationDate}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            alert('Lỗi khi tải dữ liệu: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        
+        // Điền thông tin vào form sửa
+        document.getElementById('editUpdateName').value = data.update_name;
+        document.getElementById('editApplicationDate').value = data.application_date;
+        document.getElementById('editNewUpdateName').value = data.update_name;
+        document.getElementById('editFormApplicationDate').value = data.application_date;
+        document.getElementById('editFormUpdateName').value = data.update_name;
+        
+        // Tạo bảng sửa
+        const tbody = document.getElementById('editTableBody');
+        tbody.innerHTML = '';
+        
+        data.details.forEach((detail, index) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${index + 1}</td>
+                <td><strong>${detail.route_code}</strong> - ${detail.route_name}</td>
+                <td>
+                    <input type="hidden" name="route_price_ids" value="${detail.id}">
+                    <input type="number" 
+                           name="unit_prices" 
+                           value="${detail.unit_price}"
+                           min="0" 
+                           step="1" 
+                           required 
+                           class="edit-price-input"
+                           oninput="validateInteger(this)" 
+                           onblur="validateInteger(this)"
+                           style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        document.getElementById('priceUpdateEditModal').style.display = 'block';
+    } catch (error) {
+        console.error('Error loading edit data:', error);
+        alert('Lỗi khi tải dữ liệu để sửa');
+    }
+}
+
+function closePriceUpdateEditModal() {
+    document.getElementById('priceUpdateEditModal').style.display = 'none';
+}
+</script>
+
+<style>
+.modal {
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 5% auto;
+    border: 1px solid #888;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.close:hover,
+.close:focus {
+    color: #f0f0f0;
+    text-decoration: none;
+    cursor: pointer;
+}
+</style>
+
+<!-- Modal Xem chi tiết bản cập nhật giá tuyến -->
+<div id="priceUpdateDetailModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #ddd; background: #17a2b8; color: white;">
+            <h3 style="margin: 0; color: white;">👁️ Chi tiết bản cập nhật giá tuyến</h3>
+            <span class="close" onclick="closePriceUpdateDetailModal()" style="color: white; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
+        </div>
+        <div style="padding: 20px;">
+            <div style="margin-bottom: 20px;">
+                <p><strong>Tên bản cập nhật:</strong> <span id="detailUpdateName"></span></p>
+                <p><strong>Ngày áp giá:</strong> <span id="detailApplicationDate"></span></p>
+            </div>
+            <div style="max-height: 500px; overflow-y: auto;">
+                <table class="table" style="width: 100%;">
+                    <thead style="position: sticky; top: 0; background: #17a2b8; color: white; z-index: 10;">
+                        <tr>
+                            <th style="width: 60px;">STT</th>
+                            <th>Mã tuyến</th>
+                            <th style="width: 200px;">Đơn giá (VNĐ)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailTableBody">
+                        <!-- Sẽ được điền bằng JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button type="button" class="btn btn-secondary" onclick="closePriceUpdateDetailModal()" style="padding: 10px 20px;">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Sửa bản cập nhật giá tuyến -->
+<div id="priceUpdateEditModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #ddd; background: #ffc107; color: #333;">
+            <h3 style="margin: 0; color: #333;">✏️ Sửa bản cập nhật giá tuyến</h3>
+            <span class="close" onclick="closePriceUpdateEditModal()" style="color: #333; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
+        </div>
+        <form id="editPriceUpdateForm" method="post" action="/routes/price-update-edit" enctype="application/x-www-form-urlencoded">
+            <input type="hidden" id="editFormApplicationDate" name="application_date">
+            <input type="hidden" id="editFormUpdateName" name="update_name">
+            
+            <div style="padding: 20px;">
+                <div style="display: grid; gap: 15px; margin-bottom: 20px;">
+                    <div class="form-group">
+                        <label for="editUpdateName">Tên bản cập nhật hiện tại</label>
+                        <input type="text" id="editUpdateName" readonly style="background-color: #f5f5f5; cursor: not-allowed;">
+                    </div>
+                    <div class="form-group">
+                        <label for="editNewUpdateName">Tên bản cập nhật mới (nếu muốn đổi)</label>
+                        <input type="text" id="editNewUpdateName" name="new_update_name" placeholder="Để trống nếu không muốn đổi tên">
+                    </div>
+                    <div class="form-group">
+                        <label for="editApplicationDate">Ngày áp giá</label>
+                        <input type="date" id="editApplicationDate" readonly style="background-color: #f5f5f5; cursor: not-allowed;">
+                    </div>
+                </div>
+                
+                <h4 style="margin-bottom: 15px; color: #ffc107;">Cập nhật giá tuyến</h4>
+                <div style="max-height: 400px; overflow-y: auto; margin-bottom: 20px;">
+                    <table class="table" style="width: 100%;">
+                        <thead style="position: sticky; top: 0; background: #ffc107; color: #333; z-index: 10;">
+                            <tr>
+                                <th style="width: 60px;">STT</th>
+                                <th>Mã tuyến</th>
+                                <th style="width: 200px;">Đơn giá (VNĐ) *</th>
+                            </tr>
+                        </thead>
+                        <tbody id="editTableBody">
+                            <!-- Sẽ được điền bằng JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button type="button" class="btn btn-secondary" onclick="closePriceUpdateEditModal()" style="padding: 10px 20px;">Hủy</button>
+                    <button type="submit" class="btn btn-success" style="padding: 10px 20px;">Lưu thay đổi</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Lưu ý - Đã ẩn -->
 <div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
-    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Lưu ý:</h4>
+    <h4 style="color: #5dade2; margin-bottom: 10px;">💡 Lưu ý:</h4>
     <ul style="color: #2c3e50; line-height: 1.6;">
         <li>Mã tuyến phải là duy nhất trong hệ thống</li>
         <li>Lộ trình mô tả chi tiết tuyến đường vận chuyển</li>
@@ -82,6 +617,7 @@
         <li>Lương tuyến/tháng là mức lương cố định cho tuyến này mỗi tháng</li>
         <li>Nhân viên sẽ được phân công khi ghi nhận chuyến hàng ngày</li>
     </ul>
+</div>
 </div>
 
 {% endblock %}

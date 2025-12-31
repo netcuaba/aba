@@ -1,0 +1,608 @@
+{% extends "base.html" %}
+
+{% block title %}Thống kê tài chính - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<style>
+    .statistics-container {
+        max-width: 1600px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #f8fafc;
+    }
+    
+    .page-header {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    
+    .page-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    
+    .search-form {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+    
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .form-label {
+        font-weight: 600;
+        margin-bottom: 5px;
+        color: #374151;
+        font-size: 0.9rem;
+    }
+    
+    .form-input,
+    .form-select {
+        padding: 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
+    }
+    
+    .form-input:focus,
+    .form-select:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    .btn-search {
+        background: #3b82f6;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 1rem;
+    }
+    
+    .btn-search:hover {
+        background: #2563eb;
+        transform: translateY(-1px);
+    }
+    
+    .results-container {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    
+    .results-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+    }
+    
+    .results-table thead th {
+        background: #f1f5f9;
+        color: #374151;
+        padding: 12px;
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 2px solid #e2e8f0;
+    }
+    
+    .results-table tbody td {
+        padding: 12px;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    
+    .results-table tbody tr:hover {
+        background: #f8fafc;
+    }
+    
+    .results-table tbody tr:last-child {
+        font-weight: 700;
+        background: #f1f5f9;
+    }
+    
+    .results-table tbody tr:last-child td {
+        border-top: 2px solid #e2e8f0;
+    }
+    
+    .amount-cell {
+        text-align: right;
+        font-family: 'Courier New', monospace;
+        font-weight: 500;
+        color: #1e293b;
+    }
+    
+    .amount-positive {
+        color: #1e293b;
+    }
+    
+    .results-table tbody tr:last-child td {
+        border-top: 2px solid #e2e8f0;
+        font-weight: 700;
+    }
+    
+    .calculation-section {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .calculation-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        margin-bottom: 15px;
+        color: #1e293b;
+    }
+    
+    .calculation-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    
+    .calculation-row:last-child {
+        border-bottom: none;
+        border-top: 2px solid #e2e8f0;
+        font-weight: 700;
+        font-size: 1.1rem;
+        margin-top: 10px;
+        padding-top: 15px;
+    }
+    
+    .calculation-label {
+        color: #6b7280;
+        font-weight: 500;
+    }
+    
+    .calculation-value {
+        font-family: 'Courier New', monospace;
+        font-weight: 600;
+        color: #1e293b;
+    }
+    
+    .calculation-row:last-child .calculation-value {
+        color: #3b82f6;
+        font-size: 1.2rem;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #6b7280;
+    }
+    
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+    
+    .empty-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 10px;
+        color: #374151;
+    }
+    
+    .btn-detail {
+        background: #3b82f6;
+        color: white;
+        padding: 6px 12px;
+        border: none;
+        border-radius: 4px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.875rem;
+    }
+    
+    .btn-detail:hover {
+        background: #2563eb;
+        transform: translateY(-1px);
+    }
+    
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        overflow: auto;
+    }
+    
+    .modal-content {
+        background-color: #fefefe;
+        margin: 2% auto;
+        padding: 0;
+        border: none;
+        border-radius: 8px;
+        width: 95%;
+        max-width: 1400px;
+        max-height: 90vh;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .modal-header {
+        padding: 20px;
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        color: white;
+        border-radius: 8px 8px 0 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .modal-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    
+    .close {
+        color: white;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+        line-height: 1;
+    }
+    
+    .close:hover,
+    .close:focus {
+        color: #f1f5f9;
+    }
+    
+    .modal-body {
+        padding: 20px;
+        overflow-y: auto;
+        flex: 1;
+    }
+    
+    .detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+    }
+    
+    .detail-table thead th {
+        background: #f1f5f9;
+        color: #374151;
+        padding: 12px;
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 2px solid #e2e8f0;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+    
+    .detail-table tbody td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    
+    .detail-table tbody tr:hover {
+        background: #f8fafc;
+    }
+    
+    .text-center {
+        text-align: center;
+    }
+    
+    .text-right {
+        text-align: right;
+    }
+    
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #6b7280;
+    }
+    
+    .no-data {
+        text-align: center;
+        padding: 40px;
+        color: #6b7280;
+    }
+</style>
+
+<div class="statistics-container">
+    <!-- Header -->
+    <div class="page-header">
+        <h1 class="page-title">📊 Thống kê tài chính</h1>
+    </div>
+    
+    <!-- Search Form -->
+    <div class="search-form">
+        <form method="GET" action="/financial-statistics">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label class="form-label">Từ ngày *</label>
+                    <input type="date" name="from_date" class="form-input" value="{{ from_date }}" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Đến ngày *</label>
+                    <input type="date" name="to_date" class="form-input" value="{{ to_date }}" required>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn-search">
+                🔍 Tìm kiếm
+            </button>
+        </form>
+    </div>
+    
+    <!-- Results Table -->
+    {% if search_results %}
+    <div class="results-container">
+        <h2 style="margin-top: 0; margin-bottom: 20px; color: #1e293b;">Bảng tổng hợp kết quả</h2>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>TÊN CHUYẾN</th>
+                    <th>SỐ TIỀN TRƯỚC VAT</th>
+                    <th>CHI TIẾT</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in search_results %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td><strong>{{ result.route_code }}</strong></td>
+                    <td class="amount-cell amount-positive">{{ "{:,.0f}".format(result.revenue|default(0)) }}</td>
+                    <td>
+                        <button class="btn-detail" 
+                                data-route-code="{{ result.route_code }}"
+                                data-from-date="{{ from_date }}"
+                                data-to-date="{{ to_date }}"
+                                onclick="showDetailsFromButton(this)">
+                            Chi tiết
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+                <tr style="font-weight: 700; background: #f1f5f9;">
+                    <td colspan="2"><strong>TỔNG CỘNG</strong></td>
+                    <td class="amount-cell amount-positive"><strong>{{ "{:,.0f}".format(total_revenue|default(0)) }}</strong></td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Calculation Section -->
+    <div class="calculation-section">
+        <div class="calculation-row" style="font-weight: 700; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">
+            <span class="calculation-label">TỔNG CỘNG</span>
+            <span class="calculation-value">{{ "{:,.0f}".format(total_revenue|default(0)) }}</span>
+        </div>
+        
+        <div class="calculation-row">
+            <span class="calculation-label">Chiết khấu tháng 12.2025 5%</span>
+            <span class="calculation-value">{{ "{:,.0f}".format(discount_ghn|default(0)) }}</span>
+        </div>
+        
+        <div class="calculation-row">
+            <span class="calculation-label">Phí quản lý 5% (sau ck)</span>
+            <span class="calculation-value">{{ "{:,.0f}".format(discount_vo_gia|default(0)) }}</span>
+        </div>
+        
+        <div class="calculation-row" style="font-weight: 700; border-top: 2px solid #e2e8f0; padding-top: 10px;">
+            <span class="calculation-label">Tổng tiền sau khi chiết khẩu</span>
+            <span class="calculation-value">{{ "{:,.0f}".format(remaining_after_vo_gia|default(0)) }}</span>
+        </div>
+        
+        <div class="calculation-row">
+            <span class="calculation-label">Thuế GTGT</span>
+            <span class="calculation-value">{{ "{:,.0f}".format(vat|default(0)) }}</span>
+        </div>
+        
+        <div class="calculation-row" style="font-weight: 700; border-top: 2px solid #e2e8f0; padding-top: 15px; font-size: 1.1rem;">
+            <span class="calculation-label">TỔNG CỘNG</span>
+            <span class="calculation-value" style="color: #3b82f6; font-size: 1.2rem;">{{ "{:,.0f}".format(final_total|default(0)) }}</span>
+        </div>
+    </div>
+    {% elif from_date and to_date %}
+    <div class="results-container">
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <h3 class="empty-title">Không tìm thấy kết quả</h3>
+            <p>Không có dữ liệu doanh thu trong khoảng thời gian đã chọn.</p>
+        </div>
+    </div>
+    {% else %}
+    <div class="results-container">
+        <div class="empty-state">
+            <div class="empty-icon">🔍</div>
+            <h3 class="empty-title">Vui lòng nhập thông tin tìm kiếm</h3>
+            <p>Nhập từ ngày, đến ngày và các điều kiện tìm kiếm để xem thống kê tài chính.</p>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Modal Chi tiết -->
+<div id="detailModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 class="modal-title">Chi tiết tuyến</h2>
+            <span class="close" onclick="closeModal()">&times;</span>
+        </div>
+        <div class="modal-body" id="modalBody">
+            <div class="loading">Đang tải dữ liệu...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showDetailsFromButton(button) {
+    const routeCode = button.getAttribute('data-route-code');
+    const fromDate = button.getAttribute('data-from-date');
+    const toDate = button.getAttribute('data-to-date');
+    showDetails(routeCode, fromDate, toDate);
+}
+
+async function showDetails(routeCode, fromDate, toDate) {
+    const modal = document.getElementById('detailModal');
+    const modalBody = document.getElementById('modalBody');
+    
+    // Hiển thị modal
+    modal.style.display = 'block';
+    modalBody.innerHTML = '<div class="loading">Đang tải dữ liệu...</div>';
+    
+    try {
+        // Gọi API để lấy chi tiết
+        const params = new URLSearchParams({
+            route_code: routeCode,
+            from_date: fromDate,
+            to_date: toDate
+        });
+        
+        const response = await fetch(`/api/financial-statistics/details?${params}`);
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Lỗi không xác định' }));
+            modalBody.innerHTML = `<div class="no-data">Lỗi: ${errorData.error || errorData.message || 'Không thể tải dữ liệu'}</div>`;
+            console.error('API Error:', errorData);
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('API Response:', data);
+        
+        if (data.success && data.details && data.details.length > 0) {
+            // Hiển thị bảng chi tiết
+            let html = `
+                <table class="detail-table">
+                    <thead>
+                        <tr>
+                            <th>STT</th>
+                            <th>Ngày chạy</th>
+                            <th>Mã tuyến</th>
+                            <th>Lộ trình</th>
+                            <th class="text-right">Km chạy</th>
+                            <th class="text-right">Đơn giá</th>
+                            <th class="text-right">Phí cầu đường</th>
+                            <th class="text-right">Phí tải chờ</th>
+                            <th class="text-right">Trừ Ontime</th>
+                            <th class="text-right">Thành tiền</th>
+                            <th>Lái xe</th>
+                            <th>Yêu cầu bổ sung</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            data.details.forEach((detail, index) => {
+                // Lấy thành tiền trực tiếp từ RevenueRecord (đã được tính sẵn trong API)
+                // Nếu không có, hiển thị 0
+                const totalAmount = detail.total_amount !== undefined && detail.total_amount !== null ? detail.total_amount : 0;
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${formatDate(detail.date)}</td>
+                        <td><strong>${detail.route_code || '-'}</strong></td>
+                        <td>${detail.route_name || detail.route_name_full || '-'}</td>
+                        <td class="text-right">${formatNumber(detail.distance_km, 1)}</td>
+                        <td class="text-right">${formatCurrency(detail.unit_price)}</td>
+                        <td class="text-right">${formatCurrency(detail.bridge_fee)}</td>
+                        <td class="text-right">${formatCurrency(detail.loading_fee)}</td>
+                        <td class="text-right">${formatCurrency(detail.late_penalty)}</td>
+                        <td class="text-right"><strong>${formatCurrency(totalAmount)}</strong></td>
+                        <td>${detail.driver_name || '-'}</td>
+                        <td>${detail.notes || '-'}</td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                    </tbody>
+                </table>
+            `;
+            
+            modalBody.innerHTML = html;
+        } else {
+            modalBody.innerHTML = '<div class="no-data">Không có dữ liệu</div>';
+        }
+    } catch (error) {
+        console.error('Error loading details:', error);
+        modalBody.innerHTML = '<div class="no-data">Có lỗi xảy ra khi tải dữ liệu</div>';
+    }
+}
+
+function closeModal() {
+    const modal = document.getElementById('detailModal');
+    modal.style.display = 'none';
+}
+
+// Đóng modal khi click bên ngoài
+window.onclick = function(event) {
+    const modal = document.getElementById('detailModal');
+    if (event.target == modal) {
+        closeModal();
+    }
+}
+
+// Đóng modal bằng phím ESC
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeModal();
+    }
+});
+
+function formatDate(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+}
+
+function formatCurrency(amount) {
+    if (amount === null || amount === undefined) return '0,00';
+    return parseFloat(amount).toLocaleString('vi-VN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+function formatNumber(number, decimals = 0) {
+    if (number === null || number === undefined) return '0';
+    return parseFloat(number).toLocaleString('vi-VN', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+    });
+}
+</script>
+{% endblock %}
+

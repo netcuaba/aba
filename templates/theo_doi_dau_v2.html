@@ -1,0 +1,1592 @@
+{% extends "base.html" %}
+
+{% block title %}Theo dõi dầu V2 - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="theo-doi-dau-v2-page">
+    <div class="page-header">
+        <div class="header-content">
+            <h2>⛽ Theo dõi dầu V2</h2>
+            <button type="button" class="btn btn-primary" onclick="showAddModal()">
+                ➕ Thêm mới
+            </button>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="sheet-tabs">
+        <button class="sheet-tab active" onclick="switchSheet('total')" id="tabTotal">
+            📊 Total
+        </button>
+        <button class="sheet-tab" onclick="switchSheet('danh-sach')" id="tabDanhSach">
+            📋 Danh sách đổ dầu
+        </button>
+    </div>
+
+    <!-- Sheet Total -->
+    <div class="card sheet-content" id="sheetTotal">
+        <div class="section-header">
+            <h3>📊 Total</h3>
+        </div>
+        
+        <!-- Bộ lọc tìm kiếm -->
+        <div class="filter-section">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label for="filterFromDate">Từ ngày <span class="required">*</span></label>
+                    <input type="date" id="filterFromDate" class="filter-input" onchange="loadTotals()">
+                </div>
+                <div class="filter-group">
+                    <label for="filterToDate">Đến ngày <span class="required">*</span></label>
+                    <input type="date" id="filterToDate" class="filter-input" onchange="loadTotals()">
+                </div>
+                <div class="filter-group">
+                    <label for="filterLicensePlate">Biển số xe</label>
+                    <select id="filterLicensePlate" class="filter-input" onchange="loadTotals()">
+                        <option value="Tất cả">Tất cả</option>
+                        {% for vehicle in vehicles %}
+                        <option value="{{ vehicle.license_plate }}">{{ vehicle.license_plate }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <button type="button" class="btn btn-primary" onclick="loadTotals()">
+                        🔍 Tìm kiếm
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bảng tổng hợp -->
+        <div class="table-container-scroll">
+            <table class="fuel-totals-table" id="fuelTotalsTable">
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Biển số xe</th>
+                        <th>Tổng số lít dầu đổ</th>
+                        <th>Tổng số tiền dầu đổ</th>
+                        <th>Chi tiết</th>
+                    </tr>
+                </thead>
+                <tbody id="fuelTotalsBody">
+                    <tr>
+                        <td colspan="5" class="text-center">Vui lòng chọn khoảng thời gian và nhấn "Tìm kiếm"</td>
+                    </tr>
+                </tbody>
+                <tfoot id="fuelTotalsFooter" style="display: none;">
+                    <tr class="summary-row">
+                        <td colspan="2"><strong>Tổng cộng</strong></td>
+                        <td class="number"><strong id="totalLitersFooter">0.00 lít</strong></td>
+                        <td class="number"><strong id="totalCostFooter">0 đ</strong></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <!-- Sheet Danh sách đổ dầu -->
+    <div class="card sheet-content" id="sheetDanhSach" style="display: none;">
+        <div class="section-header">
+            <h3>📋 Danh sách đổ dầu</h3>
+        </div>
+        
+        <div class="table-container-scroll">
+            <table class="fuel-records-table" id="fuelRecordsTable">
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Ngày</th>
+                        <th>Biển số xe</th>
+                        <th>Đơn giá dầu</th>
+                        <th>Số lít dầu đổ</th>
+                        <th>Thành tiền</th>
+                        <th>Ghi chú</th>
+                        <th>Hành động</th>
+                    </tr>
+                </thead>
+                <tbody id="fuelRecordsBody">
+                    {% if fuel_records %}
+                        {% for record in fuel_records %}
+                        <tr data-record-id="{{ record.id }}">
+                            <td>{{ loop.index }}</td>
+                            <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
+                            <td><strong>{{ record.license_plate }}</strong></td>
+                            <td class="number">{{ "{:,.0f}".format(record.fuel_price_per_liter) }} đ</td>
+                            <td class="number">{{ "{:,.2f}".format(record.liters_pumped) }} lít</td>
+                            <td class="number"><strong>{{ "{:,.0f}".format(record.cost_pumped) }} đ</strong></td>
+                            <td>{{ record.notes or '' }}</td>
+                            <td class="actions">
+                                <button class="btn btn-warning btn-sm" onclick="editRecord({{ record.id }})" title="Sửa">
+                                    ✏️ Sửa
+                                </button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteRecord({{ record.id }})" title="Xóa">
+                                    🗑️ Xóa
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center">Không có dữ liệu đổ dầu.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+                <tfoot id="summaryRow">
+                    {% if fuel_records %}
+                    <tr class="summary-row">
+                        <td colspan="3"><strong>Tổng</strong></td>
+                        <td></td>
+                        <td class="number"><strong id="totalLiters">{{ "{:,.2f}".format(fuel_records | sum(attribute='liters_pumped')) }} lít</strong></td>
+                        <td class="number"><strong id="totalCost">{{ "{:,.0f}".format(fuel_records | sum(attribute='cost_pumped')) }} đ</strong></td>
+                        <td></td>
+                        <td></td>
+                    </tr>
+                    {% endif %}
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Thêm mới / Sửa -->
+<div id="recordModal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="modalTitle">➕ Thêm bản ghi mới</h3>
+            <button class="modal-close" onclick="closeModal()" title="Đóng">&times;</button>
+        </div>
+        <div class="modal-body">
+            <!-- Form đơn (cho sửa) -->
+            <form id="recordForm" onsubmit="saveRecord(event)" style="display: none;">
+                <input type="hidden" id="recordId" name="record_id">
+                
+                <div class="form-group">
+                    <label for="date">Ngày <span class="required">*</span></label>
+                    <input type="date" id="date" name="date" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="license_plate">Biển số xe <span class="required">*</span></label>
+                    <select id="license_plate" name="license_plate" required>
+                        <option value="">-- Chọn biển số xe --</option>
+                        {% for vehicle in vehicles %}
+                        <option value="{{ vehicle.license_plate }}">{{ vehicle.license_plate }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="unit_price">Đơn giá dầu (đồng/lít) <span class="required">*</span></label>
+                    <input type="number" id="unit_price" name="unit_price" step="0.01" min="0" required oninput="calculateTotal()">
+                </div>
+                
+                <div class="form-group">
+                    <label for="liters">Số lít dầu đổ <span class="required">*</span></label>
+                    <input type="number" id="liters" name="liters" step="0.01" min="0" required oninput="calculateTotal()">
+                </div>
+                
+                <div class="form-group">
+                    <label for="total_amount">Thành tiền</label>
+                    <input type="text" id="total_amount" name="total_amount" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label for="notes">Ghi chú</label>
+                    <textarea id="notes" name="notes" rows="3" placeholder="Nhập ghi chú (nếu có)"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">💾 Lưu</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">❌ Hủy</button>
+                </div>
+            </form>
+            
+            <!-- Form nhiều dòng (cho thêm mới) -->
+            <div id="bulkFormContainer">
+                <div class="bulk-form-header">
+                    <p class="info-text">Bạn có thể thêm nhiều dòng dữ liệu cùng lúc. Nhấn "➕ Thêm dòng" để thêm dòng mới.</p>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="addBulkRow()">
+                        ➕ Thêm dòng
+                    </button>
+                </div>
+                
+                <div class="bulk-table-container">
+                    <table class="bulk-input-table" id="bulkInputTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px; text-align: center;">STT</th>
+                                <th style="width: 120px;">Ngày <span class="required">*</span></th>
+                                <th style="width: 130px;">Biển số xe <span class="required">*</span></th>
+                                <th style="width: 130px;">Đơn giá (đ/lít) <span class="required">*</span></th>
+                                <th style="width: 100px;">Số lít <span class="required">*</span></th>
+                                <th style="width: 130px;">Thành tiền</th>
+                                <th>Ghi chú</th>
+                                <th style="width: 80px; text-align: center;">Hành động</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bulkInputBody">
+                            <!-- Rows will be added dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-success" onclick="saveBulkRecords()">💾 Lưu tất cả</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">❌ Hủy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Chi tiết đổ dầu -->
+<div id="detailModal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="detailModalTitle">📋 Chi tiết đổ dầu</h3>
+            <button class="modal-close" onclick="closeDetailModal()" title="Đóng">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="detailModalInfo" style="margin-bottom: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 4px;">
+                <p><strong>Biển số xe:</strong> <span id="detailLicensePlate"></span></p>
+                <p><strong>Khoảng thời gian:</strong> <span id="detailDateRange"></span></p>
+            </div>
+            <div class="table-container-scroll" style="max-height: 500px;">
+                <table class="fuel-records-table" id="detailRecordsTable">
+                    <thead>
+                        <tr>
+                            <th>STT</th>
+                            <th>Ngày đổ dầu</th>
+                            <th>Số lít</th>
+                            <th>Đơn giá</th>
+                            <th>Số tiền</th>
+                            <th>Ghi chú</th>
+                            <th>Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailRecordsBody">
+                        <!-- Dữ liệu sẽ được load động -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-actions" style="margin-top: 20px;">
+                <button type="button" class="btn btn-secondary" onclick="closeDetailModal()">❌ Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Danh sách biển số xe từ server -->
+<script>
+const vehiclesList = [
+    {% for vehicle in vehicles %}
+    { license_plate: "{{ vehicle.license_plate }}" },
+    {% endfor %}
+];
+</script>
+
+<script>
+let allFuelRecords = [];
+
+// Format số tiền
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('vi-VN').format(Math.round(amount));
+}
+
+// Format ngày từ YYYY-MM-DD sang DD/MM/YYYY
+function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr + 'T00:00:00');
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+}
+
+// Tính thành tiền
+function calculateTotal() {
+    const unitPrice = parseFloat(document.getElementById('unit_price').value) || 0;
+    const liters = parseFloat(document.getElementById('liters').value) || 0;
+    const totalAmount = Math.round(unitPrice * liters);
+    document.getElementById('total_amount').value = formatCurrency(totalAmount) + ' đ';
+}
+
+// Biến đếm số dòng trong form bulk
+let bulkRowCounter = 0;
+
+// Hiển thị modal thêm mới
+function showAddModal() {
+    document.getElementById('modalTitle').textContent = '➕ Thêm bản ghi mới';
+    
+    // Ẩn form đơn, hiển thị form bulk
+    document.getElementById('recordForm').style.display = 'none';
+    document.getElementById('bulkFormContainer').style.display = 'block';
+    
+    // Xóa tất cả dòng cũ và reset counter
+    document.getElementById('bulkInputBody').innerHTML = '';
+    bulkRowCounter = 0;
+    
+    // Thêm dòng đầu tiên
+    addBulkRow();
+    
+    document.getElementById('recordModal').style.display = 'flex';
+}
+
+// Hiển thị modal sửa
+async function editRecord(recordId) {
+    try {
+        // Tìm record trong danh sách hiện tại
+        const record = allFuelRecords.find(r => r.id === recordId);
+        if (!record) {
+            // Nếu không tìm thấy, load lại dữ liệu
+            await loadAllRecords();
+            const updatedRecord = allFuelRecords.find(r => r.id === recordId);
+            if (!updatedRecord) {
+                alert('Không tìm thấy bản ghi');
+                return;
+            }
+            fillEditForm(updatedRecord);
+        } else {
+            fillEditForm(record);
+        }
+    } catch (error) {
+        console.error('Error loading record:', error);
+        alert('Lỗi khi tải thông tin bản ghi');
+    }
+}
+
+// Điền form sửa
+function fillEditForm(record) {
+    document.getElementById('modalTitle').textContent = '✏️ Sửa bản ghi';
+    
+    // Ẩn form bulk, hiển thị form đơn
+    document.getElementById('bulkFormContainer').style.display = 'none';
+    document.getElementById('recordForm').style.display = 'block';
+    
+    document.getElementById('recordId').value = record.id;
+    document.getElementById('date').value = record.date;
+    document.getElementById('license_plate').value = record.license_plate;
+    document.getElementById('unit_price').value = record.unit_price;
+    document.getElementById('liters').value = record.liters;
+    document.getElementById('notes').value = record.notes || '';
+    calculateTotal();
+    document.getElementById('recordModal').style.display = 'flex';
+}
+
+// Đóng modal
+function closeModal() {
+    document.getElementById('recordModal').style.display = 'none';
+    document.getElementById('recordForm').reset();
+    document.getElementById('bulkInputBody').innerHTML = '';
+    bulkRowCounter = 0;
+}
+
+// Thêm dòng mới vào bảng bulk
+function addBulkRow() {
+    bulkRowCounter++;
+    const tbody = document.getElementById('bulkInputBody');
+    const rowIndex = bulkRowCounter;
+    
+    // Set ngày mặc định là hôm nay
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const defaultDate = `${year}-${month}-${day}`;
+    
+    // Tạo options cho select biển số xe
+    const vehicleOptions = vehiclesList.map(v => 
+        `<option value="${v.license_plate}">${v.license_plate}</option>`
+    ).join('');
+    
+    const row = document.createElement('tr');
+    row.id = `bulkRow_${rowIndex}`;
+    row.innerHTML = `
+        <td style="text-align: center;">${rowIndex}</td>
+        <td>
+            <input type="date" class="bulk-input" data-field="date" value="${defaultDate}" required>
+        </td>
+        <td>
+            <select class="bulk-input" data-field="license_plate" required>
+                <option value="">-- Chọn --</option>
+                ${vehicleOptions}
+            </select>
+        </td>
+        <td>
+            <input type="number" class="bulk-input" data-field="unit_price" step="0.01" min="0" placeholder="0" required oninput="calculateBulkRowTotal(${rowIndex})">
+        </td>
+        <td>
+            <input type="number" class="bulk-input" data-field="liters" step="0.01" min="0" placeholder="0" required oninput="calculateBulkRowTotal(${rowIndex})">
+        </td>
+        <td>
+            <input type="text" class="bulk-input" data-field="total_amount" readonly value="0 đ" style="text-align: right;">
+        </td>
+        <td>
+            <input type="text" class="bulk-input" data-field="notes" placeholder="Ghi chú">
+        </td>
+        <td style="text-align: center;">
+            <button type="button" class="btn btn-danger btn-sm" onclick="removeBulkRow(${rowIndex})" title="Xóa dòng">
+                🗑️
+            </button>
+        </td>
+    `;
+    
+    tbody.appendChild(row);
+    updateBulkRowNumbers();
+}
+
+// Xóa dòng khỏi bảng bulk
+function removeBulkRow(rowIndex) {
+    const row = document.getElementById(`bulkRow_${rowIndex}`);
+    if (row) {
+        row.remove();
+        updateBulkRowNumbers();
+    }
+}
+
+// Cập nhật số thứ tự các dòng
+function updateBulkRowNumbers() {
+    const rows = document.querySelectorAll('#bulkInputBody tr');
+    rows.forEach((row, index) => {
+        const firstCell = row.querySelector('td:first-child');
+        if (firstCell) {
+            firstCell.textContent = index + 1;
+        }
+    });
+}
+
+// Tính thành tiền cho một dòng
+function calculateBulkRowTotal(rowIndex) {
+    const row = document.getElementById(`bulkRow_${rowIndex}`);
+    if (!row) return;
+    
+    const unitPriceInput = row.querySelector('[data-field="unit_price"]');
+    const litersInput = row.querySelector('[data-field="liters"]');
+    const totalInput = row.querySelector('[data-field="total_amount"]');
+    
+    if (!unitPriceInput || !litersInput || !totalInput) return;
+    
+    const unitPrice = parseFloat(unitPriceInput.value) || 0;
+    const liters = parseFloat(litersInput.value) || 0;
+    const totalAmount = Math.round(unitPrice * liters);
+    
+    totalInput.value = formatCurrency(totalAmount) + ' đ';
+}
+
+// Lưu tất cả các dòng bulk
+async function saveBulkRecords() {
+    const rows = document.querySelectorAll('#bulkInputBody tr');
+    
+    if (rows.length === 0) {
+        alert('Vui lòng thêm ít nhất một dòng dữ liệu');
+        return;
+    }
+    
+    const records = [];
+    let hasError = false;
+    let errorMessage = '';
+    
+    rows.forEach((row, index) => {
+        const dateInput = row.querySelector('[data-field="date"]');
+        const licensePlateInput = row.querySelector('[data-field="license_plate"]');
+        const unitPriceInput = row.querySelector('[data-field="unit_price"]');
+        const litersInput = row.querySelector('[data-field="liters"]');
+        const notesInput = row.querySelector('[data-field="notes"]');
+        
+        const date = dateInput ? dateInput.value : '';
+        const licensePlate = licensePlateInput ? licensePlateInput.value : '';
+        const unitPrice = unitPriceInput ? parseFloat(unitPriceInput.value) : 0;
+        const liters = litersInput ? parseFloat(litersInput.value) : 0;
+        const notes = notesInput ? notesInput.value : '';
+        
+        // Validate
+        if (!date || !licensePlate) {
+            hasError = true;
+            errorMessage += `Dòng ${index + 1}: Vui lòng điền đầy đủ thông tin bắt buộc\n`;
+            return;
+        }
+        
+        if (unitPrice <= 0 || liters <= 0) {
+            hasError = true;
+            errorMessage += `Dòng ${index + 1}: Đơn giá và số lít phải lớn hơn 0\n`;
+            return;
+        }
+        
+        records.push({
+            date: date,
+            license_plate: licensePlate,
+            unit_price: unitPrice,
+            liters: liters,
+            notes: notes
+        });
+    });
+    
+    if (hasError) {
+        alert(errorMessage);
+        return;
+    }
+    
+    if (records.length === 0) {
+        alert('Không có dữ liệu hợp lệ để lưu');
+        return;
+    }
+    
+    // Xác nhận trước khi lưu
+    if (!confirm(`Bạn có chắc chắn muốn lưu ${records.length} bản ghi?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/do-dau/add-bulk', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ records: records })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            let message = `Đã thêm thành công ${result.added_count}/${result.total_count} bản ghi`;
+            if (result.errors && result.errors.length > 0) {
+                message += '\n\nLỗi:\n' + result.errors.join('\n');
+            }
+            alert(message);
+            closeModal();
+            await loadAllRecords();
+            // Reload totals nếu đã có filter
+            const fromDate = document.getElementById('filterFromDate')?.value;
+            const toDate = document.getElementById('filterToDate')?.value;
+            if (fromDate && toDate) {
+                await loadTotals();
+            }
+        } else {
+            alert('Lỗi: ' + (result.error || 'Không thể lưu bản ghi'));
+        }
+    } catch (error) {
+        console.error('Error saving bulk records:', error);
+        alert('Lỗi khi lưu bản ghi');
+    }
+}
+
+// Lưu bản ghi (thêm mới hoặc sửa)
+async function saveRecord(event) {
+    event.preventDefault();
+    
+    const recordId = document.getElementById('recordId').value;
+    const date = document.getElementById('date').value;
+    const licensePlate = document.getElementById('license_plate').value;
+    const unitPrice = parseFloat(document.getElementById('unit_price').value);
+    const liters = parseFloat(document.getElementById('liters').value);
+    const notes = document.getElementById('notes').value;
+    
+    // Validate
+    if (!date || !licensePlate) {
+        alert('Vui lòng điền đầy đủ thông tin bắt buộc');
+        return;
+    }
+    
+    if (unitPrice <= 0 || liters <= 0) {
+        alert('Đơn giá và số lít phải lớn hơn 0');
+        return;
+    }
+    
+    const data = {
+        date: date,
+        license_plate: licensePlate,
+        unit_price: unitPrice,
+        liters: liters,
+        notes: notes
+    };
+    
+    const url = recordId ? `/api/do-dau/edit/${recordId}` : '/api/do-dau/add';
+    const method = recordId ? 'PUT' : 'POST';
+    
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(recordId ? 'Cập nhật bản ghi thành công' : 'Thêm bản ghi thành công');
+            closeModal();
+            await loadAllRecords();
+            // Reload totals nếu đã có filter
+            const fromDate = document.getElementById('filterFromDate')?.value;
+            const toDate = document.getElementById('filterToDate')?.value;
+            if (fromDate && toDate) {
+                await loadTotals();
+            }
+        } else {
+            alert('Lỗi: ' + (result.error || 'Không thể lưu bản ghi'));
+        }
+    } catch (error) {
+        console.error('Error saving record:', error);
+        alert('Lỗi khi lưu bản ghi');
+    }
+}
+
+// Xóa bản ghi
+async function deleteRecord(recordId) {
+    if (!confirm('Bạn có chắc chắn muốn xóa bản ghi này?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/do-dau/delete/${recordId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('Xóa bản ghi thành công');
+            await loadAllRecords();
+            // Reload totals nếu đã có filter
+            const fromDate = document.getElementById('filterFromDate')?.value;
+            const toDate = document.getElementById('filterToDate')?.value;
+            if (fromDate && toDate) {
+                await loadTotals();
+            }
+            // Reload detail modal nếu đang mở
+            const detailModal = document.getElementById('detailModal');
+            if (detailModal && detailModal.style.display !== 'none') {
+                const licensePlate = document.getElementById('detailLicensePlate')?.textContent;
+                if (licensePlate && fromDate && toDate) {
+                    await showDetailModal(licensePlate, fromDate, toDate);
+                }
+            }
+        } else {
+            alert('Lỗi: ' + (result.error || 'Không thể xóa bản ghi'));
+        }
+    } catch (error) {
+        console.error('Error deleting record:', error);
+        alert('Lỗi khi xóa bản ghi');
+    }
+}
+
+// Load tất cả bản ghi
+async function loadAllRecords() {
+    try {
+        const response = await fetch('/api/do-dau/all');
+        const data = await response.json();
+        
+        if (data.success && data.records) {
+            allFuelRecords = data.records;
+            renderTable();
+        }
+    } catch (error) {
+        console.error('Error loading records:', error);
+    }
+}
+
+// Render bảng
+function renderTable() {
+    const tbody = document.getElementById('fuelRecordsBody');
+    
+    if (allFuelRecords.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">Không có dữ liệu đổ dầu.</td></tr>';
+        updateSummary(0, 0);
+        return;
+    }
+    
+    tbody.innerHTML = allFuelRecords.map((record, index) => {
+        return `
+            <tr data-record-id="${record.id}">
+                <td>${index + 1}</td>
+                <td>${formatDate(record.date)}</td>
+                <td><strong>${record.license_plate}</strong></td>
+                <td class="number">${formatCurrency(record.unit_price)} đ</td>
+                <td class="number">${record.liters.toFixed(2)} lít</td>
+                <td class="number"><strong>${formatCurrency(record.total_amount)} đ</strong></td>
+                <td>${record.person || ''}</td>
+                <td class="actions">
+                    <button class="btn btn-warning btn-sm" onclick="editRecord(${record.id})" title="Sửa">
+                        ✏️ Sửa
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteRecord(${record.id})" title="Xóa">
+                        🗑️ Xóa
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    // Tính tổng
+    const totalLiters = allFuelRecords.reduce((sum, r) => sum + (r.liters || 0), 0);
+    const totalCost = allFuelRecords.reduce((sum, r) => sum + (r.total_amount || 0), 0);
+    updateSummary(totalLiters, totalCost);
+}
+
+// Cập nhật hàng tổng
+function updateSummary(totalLiters, totalCost) {
+    const summaryRow = document.getElementById('summaryRow');
+    if (summaryRow) {
+        summaryRow.innerHTML = `
+            <tr class="summary-row">
+                <td colspan="3"><strong>Tổng</strong></td>
+                <td></td>
+                <td class="number"><strong>${totalLiters.toFixed(2)} lít</strong></td>
+                <td class="number"><strong>${formatCurrency(totalCost)} đ</strong></td>
+                <td></td>
+                <td></td>
+            </tr>
+        `;
+    }
+}
+
+// Đóng modal khi click bên ngoài
+window.onclick = function(event) {
+    const modal = document.getElementById('recordModal');
+    if (event.target === modal) {
+        closeModal();
+    }
+    const detailModal = document.getElementById('detailModal');
+    if (event.target === detailModal) {
+        closeDetailModal();
+    }
+}
+
+// ===== TOTAL SHEET FUNCTIONS =====
+
+// Lấy ngày đầu tháng hiện tại
+function getFirstDayOfMonth() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}-01`;
+}
+
+// Lấy ngày cuối tháng hiện tại
+function getLastDayOfMonth() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1;
+    const lastDay = new Date(year, month, 0).getDate();
+    return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
+// Load tổng hợp dữ liệu
+async function loadTotals() {
+    const fromDate = document.getElementById('filterFromDate').value;
+    const toDate = document.getElementById('filterToDate').value;
+    const licensePlate = document.getElementById('filterLicensePlate').value;
+    
+    if (!fromDate || !toDate) {
+        alert('Vui lòng chọn đầy đủ từ ngày và đến ngày');
+        return;
+    }
+    
+    try {
+        let url = `/api/do-dau/totals?from_date=${fromDate}&to_date=${toDate}`;
+        if (licensePlate && licensePlate !== 'Tất cả') {
+            url += `&license_plate=${encodeURIComponent(licensePlate)}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && data.totals) {
+            renderTotalsTable(data.totals, fromDate, toDate);
+        } else {
+            alert('Lỗi: ' + (data.error || 'Không thể tải dữ liệu'));
+            renderTotalsTable([], fromDate, toDate);
+        }
+    } catch (error) {
+        console.error('Error loading totals:', error);
+        alert('Lỗi khi tải dữ liệu tổng hợp');
+        renderTotalsTable([], fromDate, toDate);
+    }
+}
+
+// Render bảng tổng hợp
+function renderTotalsTable(totals, fromDate, toDate) {
+    const tbody = document.getElementById('fuelTotalsBody');
+    const footer = document.getElementById('fuelTotalsFooter');
+    
+    if (!totals || totals.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center">Không có dữ liệu trong khoảng thời gian đã chọn</td></tr>';
+        // Ẩn footer khi không có dữ liệu
+        if (footer) {
+            footer.style.display = 'none';
+        }
+        return;
+    }
+    
+    // Hiển thị footer khi có dữ liệu
+    if (footer) {
+        footer.style.display = '';
+    }
+    
+    tbody.innerHTML = totals.map((item, index) => {
+        return `
+            <tr>
+                <td>${index + 1}</td>
+                <td><strong>${item.license_plate}</strong></td>
+                <td class="number">${item.total_liters.toFixed(2)} lít</td>
+                <td class="number"><strong>${formatCurrency(item.total_cost)} đ</strong></td>
+                <td class="actions">
+                    <button class="btn btn-info btn-sm" onclick="showDetailModal('${item.license_plate}', '${fromDate}', '${toDate}')" title="Xem chi tiết">
+                        📋 Chi tiết
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    // Tính tổng cộng
+    const totalLiters = totals.reduce((sum, item) => sum + (item.total_liters || 0), 0);
+    const totalCost = totals.reduce((sum, item) => sum + (item.total_cost || 0), 0);
+    
+    // Cập nhật footer
+    const totalLitersElement = document.getElementById('totalLitersFooter');
+    const totalCostElement = document.getElementById('totalCostFooter');
+    if (totalLitersElement) {
+        totalLitersElement.textContent = totalLiters.toFixed(2) + ' lít';
+    }
+    if (totalCostElement) {
+        totalCostElement.textContent = formatCurrency(totalCost) + ' đ';
+    }
+}
+
+// Hiển thị modal chi tiết
+async function showDetailModal(licensePlate, fromDate, toDate) {
+    try {
+        const url = `/api/do-dau/detail/${encodeURIComponent(licensePlate)}?from_date=${fromDate}&to_date=${toDate}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.records) {
+            // Cập nhật thông tin modal
+            document.getElementById('detailLicensePlate').textContent = licensePlate;
+            document.getElementById('detailDateRange').textContent = 
+                `${formatDate(fromDate)} - ${formatDate(toDate)}`;
+            
+            // Render bảng chi tiết
+            const tbody = document.getElementById('detailRecordsBody');
+            if (data.records.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center">Không có dữ liệu đổ dầu trong khoảng thời gian này</td></tr>';
+            } else {
+                tbody.innerHTML = data.records.map((record, index) => {
+                    return `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${formatDate(record.date)}</td>
+                            <td class="number">${record.liters.toFixed(2)} lít</td>
+                            <td class="number">${formatCurrency(record.unit_price)} đ</td>
+                            <td class="number"><strong>${formatCurrency(record.total_amount)} đ</strong></td>
+                            <td>${record.notes || ''}</td>
+                            <td class="actions">
+                                <button class="btn btn-warning btn-sm" onclick="editRecord(${record.id})" title="Sửa">
+                                    ✏️ Sửa
+                                </button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteRecord(${record.id})" title="Xóa">
+                                    🗑️ Xóa
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+            
+            // Hiển thị modal
+            document.getElementById('detailModal').style.display = 'flex';
+        } else {
+            alert('Không tìm thấy dữ liệu chi tiết');
+        }
+    } catch (error) {
+        console.error('Error loading detail:', error);
+        alert('Lỗi khi tải chi tiết đổ dầu');
+    }
+}
+
+// Đóng modal chi tiết
+function closeDetailModal() {
+    document.getElementById('detailModal').style.display = 'none';
+}
+
+// Chuyển đổi giữa các sheet
+function switchSheet(sheetName) {
+    // Ẩn tất cả các sheet
+    document.querySelectorAll('.sheet-content').forEach(sheet => {
+        sheet.style.display = 'none';
+    });
+    
+    // Bỏ active class từ tất cả các tabs
+    document.querySelectorAll('.sheet-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Hiển thị sheet được chọn
+    if (sheetName === 'total') {
+        document.getElementById('sheetTotal').style.display = 'block';
+        document.getElementById('tabTotal').classList.add('active');
+    } else if (sheetName === 'danh-sach') {
+        document.getElementById('sheetDanhSach').style.display = 'block';
+        document.getElementById('tabDanhSach').classList.add('active');
+    }
+}
+
+// Khởi tạo khi trang được load
+document.addEventListener('DOMContentLoaded', function() {
+    // Load dữ liệu ban đầu
+    loadAllRecords();
+    
+    // Khởi tạo giá trị mặc định cho bộ lọc Total
+    const filterFromDate = document.getElementById('filterFromDate');
+    const filterToDate = document.getElementById('filterToDate');
+    
+    if (filterFromDate && !filterFromDate.value) {
+        filterFromDate.value = getFirstDayOfMonth();
+    }
+    if (filterToDate && !filterToDate.value) {
+        filterToDate.value = getLastDayOfMonth();
+    }
+    
+    // Đảm bảo sheet Total được hiển thị mặc định
+    switchSheet('total');
+});
+</script>
+
+<style>
+.theo-doi-dau-v2-page {
+    padding: 20px;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.page-header {
+    margin-bottom: 30px;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.page-header h2 {
+    color: #2c3e50;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+}
+
+/* Sheet Tabs Navigation */
+.sheet-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.sheet-tab {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background-color: #e9ecef;
+    color: #495057;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.sheet-tab:hover {
+    background-color: #dee2e6;
+}
+
+.sheet-tab.active {
+    background-color: #3498db;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.sheet-content {
+    display: block;
+}
+
+.card {
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.section-header {
+    margin-bottom: 20px;
+}
+
+.section-header h3 {
+    margin-top: 0;
+    color: #2c3e50;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 10px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+}
+
+/* Filter section */
+.filter-section {
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+}
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: flex-end;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 150px;
+}
+
+.filter-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 14px;
+}
+
+.filter-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.filter-input:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+/* Totals table */
+.fuel-totals-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0;
+}
+
+.fuel-totals-table th,
+.fuel-totals-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+    font-weight: 400;
+    letter-spacing: 0.1px;
+}
+
+.fuel-totals-table th {
+    background-color: #34495e;
+    color: #ffffff;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+.fuel-totals-table tbody tr:hover {
+    background-color: #f5f5f5;
+}
+
+.fuel-totals-table .number {
+    text-align: right;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+.btn-info {
+    background-color: #17a2b8;
+    color: white;
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.btn-info:hover {
+    background-color: #138496;
+}
+
+/* Table container with scroll */
+.table-container-scroll {
+    max-height: 600px;
+    overflow-y: auto;
+    overflow-x: auto;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    scrollbar-width: thin;
+    scrollbar-color: #34495e #ecf0f1;
+}
+
+.table-container-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.table-container-scroll::-webkit-scrollbar-track {
+    background: #ecf0f1;
+    border-radius: 4px;
+}
+
+.table-container-scroll::-webkit-scrollbar-thumb {
+    background: #34495e;
+    border-radius: 4px;
+}
+
+.table-container-scroll::-webkit-scrollbar-thumb:hover {
+    background: #2c3e50;
+}
+
+.fuel-records-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0;
+}
+
+.fuel-records-table th,
+.fuel-records-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+    font-weight: 400;
+    letter-spacing: 0.1px;
+}
+
+.fuel-records-table th {
+    background-color: #34495e;
+    color: #ffffff;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+.fuel-records-table tbody tr:hover {
+    background-color: #f5f5f5;
+}
+
+.fuel-records-table .number {
+    text-align: right;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+.fuel-records-table .actions {
+    display: flex;
+    gap: 5px;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.summary-row {
+    background-color: #ecf0f1;
+    font-weight: 600;
+}
+
+.summary-row td {
+    border-top: 2px solid #34495e;
+}
+
+.text-center {
+    text-align: center;
+}
+
+/* Buttons */
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    transition: background-color 0.3s;
+}
+
+.btn-primary {
+    background-color: #3498db;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+}
+
+.btn-success {
+    background-color: #27ae60;
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: #229954;
+}
+
+.btn-secondary {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #7f8c8d;
+}
+
+.btn-warning {
+    background-color: #f39c12;
+    color: white;
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.btn-warning:hover {
+    background-color: #d68910;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+    color: white;
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.5);
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background-color: #ffffff;
+    margin: auto;
+    padding: 0;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+    animation: slideDown 0.3s ease;
+}
+
+.modal-large {
+    max-width: 1200px;
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 2px solid #e0e0e0;
+    background-color: #f8f9fa;
+    border-radius: 12px 12px 0 0;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    font-weight: bold;
+    color: #5a6c7d;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.modal-close:hover {
+    background-color: #e0e0e0;
+    color: #2c3e50;
+}
+
+.modal-body {
+    padding: 24px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.form-group label .required {
+    color: #e74c3c;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.form-group input[readonly] {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 24px;
+}
+
+/* Bulk form styles */
+#bulkFormContainer {
+    display: block;
+}
+
+.bulk-form-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+}
+
+.info-text {
+    margin: 0;
+    color: #5a6c7d;
+    font-size: 14px;
+}
+
+.bulk-table-container {
+    max-height: 500px;
+    overflow-y: auto;
+    overflow-x: auto;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+.bulk-input-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+}
+
+.bulk-input-table th {
+    background-color: #34495e;
+    color: #ffffff;
+    padding: 12px 8px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 13px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.bulk-input-table th .required {
+    color: #ffcccc;
+}
+
+.bulk-input-table td {
+    padding: 8px;
+    border-bottom: 1px solid #e0e0e0;
+    vertical-align: middle;
+}
+
+.bulk-input-table tbody tr:hover {
+    background-color: #f5f5f5;
+}
+
+.bulk-input-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.bulk-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.bulk-input:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.1);
+}
+
+.bulk-input[readonly] {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+}
+
+.bulk-input-table select.bulk-input {
+    padding: 8px 6px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .theo-doi-dau-v2-page {
+        padding: 10px;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .table-container-scroll {
+        max-height: 400px;
+    }
+    
+    .fuel-records-table th,
+    .fuel-records-table td {
+        padding: 8px;
+        font-size: 13px;
+    }
+    
+    .fuel-records-table .actions {
+        flex-direction: column;
+        gap: 3px;
+    }
+    
+    .modal-content {
+        width: 95%;
+    }
+    
+    .modal-large {
+        max-width: 95%;
+    }
+    
+    .bulk-table-container {
+        max-height: 300px;
+    }
+    
+    .bulk-input-table th,
+    .bulk-input-table td {
+        padding: 6px 4px;
+        font-size: 12px;
+    }
+    
+    .bulk-input {
+        font-size: 12px;
+        padding: 6px;
+    }
+    
+    .bulk-form-header {
+        flex-direction: column;
+        gap: 10px;
+        align-items: flex-start;
+    }
+    
+    .filter-row {
+        flex-direction: column;
+    }
+    
+    .filter-group {
+        min-width: 100%;
+    }
+    
+    .fuel-totals-table th,
+    .fuel-totals-table td {
+        padding: 8px;
+        font-size: 13px;
+    }
+    
+    .fuel-totals-table .actions {
+        flex-direction: column;
+        gap: 3px;
+    }
+    
+    .sheet-tabs {
+        gap: 8px;
+    }
+    
+    .sheet-tab {
+        padding: 8px 16px;
+        font-size: 13px;
+    }
+}
+</style>
+{% endblock %}

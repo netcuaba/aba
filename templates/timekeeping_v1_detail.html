@@ -1,0 +1,1952 @@
+{% extends "base.html" %}
+
+{% block title %}Chi tiết bảng chấm công - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+            <h2>📋 {{ timekeeping_table.name }}</h2>
+            <p style="color: #7f8c8d; margin: 5px 0 0 0;">
+                Từ ngày: <strong>{{ timekeeping_table.from_date.strftime('%d/%m/%Y') }}</strong> - 
+                Đến ngày: <strong>{{ timekeeping_table.to_date.strftime('%d/%m/%Y') }}</strong>
+            </p>
+        </div>
+        <a href="/timekeeping-v1" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Quay lại
+        </a>
+    </div>
+</div>
+
+<!-- Thông tin bảng chấm công -->
+<div class="info-card">
+    <div class="info-item">
+        <span class="info-label">Tên bảng chấm công:</span>
+        <span class="info-value">{{ timekeeping_table.name }}</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">Khoảng thời gian:</span>
+        <span class="info-value">
+            {{ timekeeping_table.from_date.strftime('%d/%m/%Y') }} - {{ timekeeping_table.to_date.strftime('%d/%m/%Y') }}
+        </span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">Ngày tạo:</span>
+        <span class="info-value">{{ timekeeping_table.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</span>
+    </div>
+</div>
+
+<!-- Sheet theo tuyến -->
+<div class="sheet-layout">
+    <div class="sheet-toolbar">
+        <div id="sheetTabs" class="sheet-tabs"></div>
+        <div class="sheet-actions">
+            <button class="btn btn-secondary" onclick="copyFirstRowDown()" id="copyDownBtn">
+                <i class="fas fa-copy"></i> Copy dòng 1 xuống
+            </button>
+            <button class="btn btn-secondary" onclick="saveCurrentSheet()" id="saveSheetBtn">
+                <i class="fas fa-save"></i> Lưu sheet
+            </button>
+            <button class="btn btn-primary" onclick="saveAllSheets()" id="saveAllBtn">
+                <i class="fas fa-cloud-upload-alt"></i> Lưu toàn bộ
+            </button>
+        </div>
+    </div>
+
+    <div class="table-section">
+        <div id="sheetMeta" class="sheet-meta"></div>
+        <div id="sheetContainer"></div>
+    </div>
+</div>
+
+<style>
+.page-header {
+    margin-bottom: 30px;
+}
+
+.page-header h2 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+}
+
+.info-card {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    margin-bottom: 30px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.info-label {
+    font-size: 12px;
+    color: #7f8c8d;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-value {
+    font-size: 16px;
+    color: #2c3e50;
+    font-weight: 500;
+}
+
+.sheet-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.sheet-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    position: sticky;
+    top: 70px;
+    background: white;
+    padding: 15px 20px;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    margin-bottom: 12px;
+}
+
+.sheet-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.sheet-tab {
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #ecf0f1;
+    color: #2c3e50;
+    border: 1px solid #dfe6e9;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+.sheet-tab.active {
+    background: #667eea;
+    color: #fff;
+    border-color: #667eea;
+    box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+}
+
+.sheet-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.table-section {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    padding: 20px;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th {
+    background: #34495e;
+    color: white;
+    padding: 8px 4px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    border: none;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Column width adjustments */
+.data-table th:nth-child(1), .data-table td:nth-child(1) { width: 45px; min-width: 45px; } /* STT */
+.data-table th:nth-child(2), .data-table td:nth-child(2) { width: 90px; min-width: 90px; } /* Ngày */
+.data-table th:nth-child(3), .data-table td:nth-child(3) { width: 135px; min-width: 135px; } /* Biển số xe */
+.data-table th:nth-child(4), .data-table td:nth-child(4) { width: 95px; min-width: 95px; } /* Mã tuyến */
+/* Status column */
+.data-table th.status-column,
+.data-table td[data-field="status"] { 
+    width: 75px; 
+    min-width: 75px; 
+}
+/* Loại tuyến - ẩn mặc định cho các sheet không phải Tăng cường */
+.data-table td[data-field="route_type"] {
+    display: none !important;
+}
+/* Loại tuyến - hiển thị cho sheet Tăng cường */
+.data-table.sheet-tang-cuong td[data-field="route_type"] {
+    display: table-cell !important;
+    width: 140px;
+    min-width: 140px;
+}
+.data-table.sheet-tang-cuong th:nth-child(5) {
+    width: 140px;
+    min-width: 140px;
+}
+/* Lộ trình - fixed width ~300px với wrap text và auto height */
+/* Header cho cột Lộ trình */
+.data-table thead th.itinerary-column {
+    width: 300px;
+    min-width: 300px;
+    max-width: 300px;
+    vertical-align: top;
+}
+/* Cell cho cột Lộ trình */
+.data-table td[data-field="itinerary"] {
+    width: 300px;
+    min-width: 300px;
+    max-width: 300px;
+    padding: 6px 4px;
+    vertical-align: top;
+    position: static;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+    overflow: visible;
+}
+.data-table td[data-field="itinerary"] .input-control,
+.data-table td[data-field="itinerary"] textarea {
+    width: 100%;
+    max-width: 100%;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    min-height: 50px;
+    height: auto;
+    resize: vertical;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    margin: 0;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    display: block;
+    position: static;
+    overflow: visible;
+}
+/* Các cột còn lại */
+/* Km chuyến - tăng độ rộng để hiển thị đầy đủ */
+.data-table th.distance-column,
+.data-table td[data-field="distance_km"] { width: 90px; min-width: 90px; }
+/* Đơn giá - giảm độ rộng */
+.data-table th.unit-price-column,
+.data-table td[data-field="unit_price"] { width: 85px; min-width: 85px; }
+.data-table td[data-field="bridge_fee"] { width: 105px; min-width: 105px; }
+.data-table td[data-field="loading_fee"] { width: 95px; min-width: 95px; }
+.data-table td[data-total] { width: 115px; min-width: 115px; }
+/* Lái xe - tăng độ rộng để hiển thị đầy đủ tên */
+.data-table th.driver-column,
+.data-table td[data-field="driver_name"] { 
+    width: 190px; 
+    min-width: 190px; 
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+.data-table td[data-field="driver_name"] .select-control {
+    width: 100%;
+    overflow: visible;
+}
+.data-table td[data-field="trip_code"] { width: 170px; min-width: 170px; }
+.data-table td[data-field="notes"] { width: 170px; min-width: 170px; }
+
+/* Style cho các field bị khóa khi Status = OFF */
+.data-table td .input-control:disabled,
+.data-table td .select-control:disabled {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Style cho date picker wrapper */
+.date-picker-wrapper {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+    min-height: 32px;
+}
+
+.date-picker-hidden {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    z-index: 10;
+    pointer-events: auto;
+    margin: 0;
+    padding: 0;
+}
+
+.date-display {
+    cursor: pointer;
+    background-color: white;
+    user-select: none;
+    pointer-events: none;
+    position: relative;
+    z-index: 1;
+}
+
+.date-display:focus {
+    outline: 2px solid #667eea;
+    outline-offset: 2px;
+}
+
+.data-table tbody tr {
+    min-height: 45px;
+    height: auto;
+}
+
+.data-table td {
+    padding: 6px 4px;
+    border-bottom: 1px solid #ecf0f1;
+    vertical-align: middle;
+    font-size: 12px;
+    min-height: 45px;
+    height: auto;
+}
+
+/* Đảm bảo khi cột Lộ trình cao, cột Lộ trình căn top */
+.data-table tbody tr td[data-field="itinerary"] {
+    vertical-align: top;
+}
+
+/* Đảm bảo textarea trong cột Lộ trình không có scrollbar và hiển thị đúng */
+.data-table td[data-field="itinerary"] textarea {
+    overflow: visible;
+    overflow-y: visible;
+    overflow-x: visible;
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+}
+
+.btn-secondary {
+    background: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #7f8c8d;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(149, 165, 166, 0.3);
+}
+
+.btn-primary {
+    background: #667eea;
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: #5568d3;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.sheet-meta {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    color: #7f8c8d;
+    font-size: 14px;
+}
+
+.input-control, .select-control {
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 12px;
+    background: #fff;
+}
+
+.input-control:focus, .select-control:focus {
+    border-color: #667eea;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.input-control[data-field="itinerary"],
+textarea[data-field="itinerary"] {
+    width: 100%;
+    min-height: 50px;
+    height: auto;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    box-sizing: border-box;
+    padding: 6px 8px;
+}
+
+.number-cell {
+    text-align: right;
+    font-size: 12px;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4338ca;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.total-cell {
+    font-weight: 700;
+    color: #1e293b;
+    text-align: right;
+    font-size: 12px;
+}
+
+.total-summary-row {
+    background-color: #f8f9fa;
+}
+
+.total-summary-row td {
+    border-top: 2px solid #667eea !important;
+    font-weight: 700;
+}
+
+.total-summary-cell {
+    font-size: 14px !important;
+    color: #667eea !important;
+}
+
+.toast {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 9999;
+    animation: slideIn 0.2s ease;
+}
+
+.toast.success { background: #16a34a; }
+.toast.error { background: #dc2626; }
+
+@keyframes slideIn {
+    from { transform: translateX(20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@media (max-width: 768px) {
+    .info-card {
+        grid-template-columns: 1fr;
+    }
+    
+    .page-header > div {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .sheet-toolbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+</style>
+
+<script>
+const timekeepingTable = {
+    id: {{ timekeeping_table.id }},
+    from_date: "{{ timekeeping_table.from_date.isoformat() }}",
+    to_date: "{{ timekeeping_table.to_date.isoformat() }}",
+    name: "{{ timekeeping_table.name }}"
+};
+
+const routes = {{ routes | tojson }};
+const dateRange = {{ date_range | tojson }};
+const employees = {{ employees | tojson }};
+const vehicles = {{ vehicles | tojson }};
+const savedDetails = {{ timekeeping_details | tojson }};
+
+let sheetData = {};
+let activeSheetKey = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    initSheets();
+});
+
+// Hàm chuyển đổi từ YYYY-MM-DD sang dd/mm/yyyy
+function formatDateToDDMMYYYY(dateStr) {
+    if (!dateStr) return "";
+    // Nếu đã là format dd/mm/yyyy, trả về luôn
+    if (typeof dateStr === 'string' && dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+        return dateStr;
+    }
+    // Convert từ YYYY-MM-DD hoặc ISO format
+    let date;
+    if (typeof dateStr === 'string' && dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+        const parts = dateStr.split('T')[0].split('-');
+        date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    } else {
+        date = new Date(dateStr);
+    }
+    if (isNaN(date.getTime())) return "";
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+}
+
+// Hàm chuyển đổi từ dd/mm/yyyy sang YYYY-MM-DD
+function parseDateFromDDMMYYYY(dateStr) {
+    if (!dateStr) return "";
+    // Nếu đã là YYYY-MM-DD, trả về luôn
+    if (typeof dateStr === 'string' && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return dateStr;
+    }
+    // Parse từ dd/mm/yyyy
+    const match = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return "";
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    // Validate date
+    const date = new Date(year, month - 1, day);
+    if (date.getDate() !== day || date.getMonth() !== month - 1 || date.getFullYear() !== year) {
+        return "";
+    }
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// Hàm tự động format ngày khi người dùng nhập (tự động thêm dấu /)
+function autoFormatDateInput(input) {
+    let value = input.value.replace(/\D/g, ''); // Chỉ giữ số
+    if (value.length >= 2) {
+        value = value.substring(0, 2) + '/' + value.substring(2);
+    }
+    if (value.length >= 5) {
+        value = value.substring(0, 5) + '/' + value.substring(5, 9);
+    }
+    input.value = value;
+}
+
+function buildOptions(list, valueKey, labelKey, selectedValue, placeholder) {
+    const options = [`<option value="">${placeholder}</option>`];
+    list.forEach(item => {
+        const value = item[valueKey] || "";
+        const label = item[labelKey] || value;
+        const selected = value === selectedValue ? "selected" : "";
+        
+        // Đặc biệt xử lý cho driver_name: chỉ hiển thị employees có is_active = true
+        // Nhưng vẫn hiển thị selectedValue nếu nó đã được chọn (giữ dữ liệu lịch sử)
+        if (valueKey === "name" && labelKey === "name") {
+            // Đây là dropdown lái xe
+            const isActive = item.is_active === true; // Chỉ true nếu explicitly set
+            const isSelected = value === selectedValue && selectedValue !== "";
+            
+            // Chỉ thêm vào dropdown nếu:
+            // 1. is_active = true (cho phép chọn mới - chỉ "Đang làm việc")
+            // 2. HOẶC đây là giá trị đã được chọn (giữ dữ liệu lịch sử)
+            if (isActive || isSelected) {
+                // Nếu không active nhưng được chọn, thêm disabled để không cho chọn lại
+                const disabledAttr = (!isActive && isSelected) ? " disabled" : "";
+                options.push(`<option value="${value}" ${selected}${disabledAttr}>${label}</option>`);
+            }
+        } else {
+            // Các dropdown khác giữ nguyên logic cũ
+            options.push(`<option value="${value}" ${selected}>${label}</option>`);
+        }
+    });
+    return options.join('');
+}
+
+function initSheets() {
+    // Khởi tạo dữ liệu sheet từ routes + dữ liệu đã lưu
+    routes.forEach(route => {
+        const key = route.route_code || route.route_name || "Sheet";
+        sheetData[key] = buildRowsForRoute(key, route);
+    });
+
+    // Nếu có sheet lưu mà không còn trong routes vẫn giữ lại
+    Object.keys(savedDetails || {}).forEach(key => {
+        if (!sheetData[key]) {
+            sheetData[key] = buildRowsFromSaved(key);
+        }
+    });
+
+    // Thêm sheet "Bộ lọc" ở đầu danh sách
+    sheetData["Bộ lọc"] = null;
+    
+    // Thêm sheet Total (không có dữ liệu, chỉ để hiển thị tổng hợp)
+    sheetData["Total"] = null;
+
+    const sheetKeys = Object.keys(sheetData);
+    if (sheetKeys.length > 0) {
+        activeSheetKey = "Bộ lọc"; // Mặc định hiển thị sheet "Bộ lọc" đầu tiên
+    }
+
+    renderTabs();
+    renderActiveSheet();
+}
+
+function buildRowsForRoute(sheetKey, route) {
+    // Xử lý đặc biệt cho sheet "Tăng cường"
+    const isTangCuong = (sheetKey || "").toUpperCase().includes("TĂNG CƯỜNG") || 
+                        (route.route_code || "").toUpperCase().includes("TĂNG CƯỜNG");
+    
+    if (isTangCuong) {
+        // Với Tăng cường, chỉ load dữ liệu đã lưu (không tạo theo ngày)
+        const saved = savedDetails && savedDetails[sheetKey] ? savedDetails[sheetKey] : [];
+        return saved.map(item => {
+            const row = {
+                sheet_name: sheetKey,
+                route_code: item.route_code || route.route_code || sheetKey,
+                route_name: item.route_name || route.route_name || sheetKey,
+                route_type: item.route_type || route.route_type || "",
+                itinerary: item.itinerary || "",
+                date: item.date || dateRange[0] || "",
+                license_plate: item.license_plate || "",
+                driver_name: item.driver_name || "",
+                trip_code: item.trip_code || "",
+                notes: item.notes || "",
+                distance_km: item.distance_km || 0,
+                unit_price: item.unit_price || 0,
+                bridge_fee: item.bridge_fee || 0,
+                loading_fee: item.loading_fee || 0
+            };
+            row.total_amount = calculateTotal(row);
+            return row;
+        });
+    }
+    
+    // Các sheet khác: tạo theo ngày như cũ
+    const savedByDate = indexSaved(sheetKey);
+    // Ngày hiệu lực giá mới: 18/12/2025
+    const newPriceEffectiveDate = "2025-12-18";
+    
+    return dateRange.map((d) => {
+        const saved = savedByDate[d] || {};
+        // Xác định đơn giá: nếu ngày >= 18/12/2025 và chưa có giá đã lưu, sử dụng giá mới từ route
+        // Nếu có giá đã lưu, giữ nguyên (cho phép override thủ công)
+        let unitPrice = route.unit_price || 0;
+        if (d >= newPriceEffectiveDate && !saved.unit_price) {
+            // Sử dụng giá mới từ RoutePrice cho ngày >= 18/12/2025
+            unitPrice = route.unit_price || 0;
+        } else if (saved.unit_price !== undefined && saved.unit_price !== null) {
+            // Nếu đã có giá đã lưu, sử dụng giá đó
+            unitPrice = saved.unit_price;
+        }
+        
+        const base = {
+            sheet_name: sheetKey,
+            route_code: route.route_code || sheetKey,
+            route_name: route.route_name || sheetKey,
+            route_type: route.route_type || "",
+            itinerary: route.route_name || "",
+            date: d,
+            license_plate: "",
+            driver_name: "",
+            trip_code: "",
+            notes: "",
+            status: "Onl", // Mặc định là Onl
+            distance_km: route.distance || 0,
+            unit_price: unitPrice,
+            bridge_fee: route.bridge_fee || 0,
+            loading_fee: route.loading_fee || 0
+        };
+        const row = {...base, ...saved};
+        // Đảm bảo status có giá trị
+        if (!row.status) row.status = "Onl";
+        row.total_amount = calculateTotal(row);
+        return row;
+    });
+}
+
+function buildRowsFromSaved(sheetKey) {
+    // Xử lý đặc biệt cho sheet "Tăng cường"
+    const isTangCuong = (sheetKey || "").toUpperCase().includes("TĂNG CƯỜNG");
+    
+    if (isTangCuong) {
+        // Với Tăng cường, chỉ load dữ liệu đã lưu
+        const saved = savedDetails && savedDetails[sheetKey] ? savedDetails[sheetKey] : [];
+        return saved.map(item => {
+            const row = {
+                sheet_name: sheetKey,
+                route_code: item.route_code || sheetKey,
+                route_name: item.route_name || sheetKey,
+                route_type: item.route_type || "",
+                itinerary: item.itinerary || "",
+                date: item.date || dateRange[0] || "",
+                license_plate: item.license_plate || "",
+                driver_name: item.driver_name || "",
+                trip_code: item.trip_code || "",
+                notes: item.notes || "",
+                distance_km: item.distance_km || 0,
+                unit_price: item.unit_price || 0,
+                bridge_fee: item.bridge_fee || 0,
+                loading_fee: item.loading_fee || 0
+            };
+            row.total_amount = calculateTotal(row);
+            return row;
+        });
+    }
+    
+    // Các sheet khác: tạo theo ngày như cũ
+    const savedByDate = indexSaved(sheetKey);
+    // Ngày hiệu lực giá mới: 18/12/2025
+    const newPriceEffectiveDate = "2025-12-18";
+    // Tìm route tương ứng từ routes array
+    const matchingRoute = routes.find(r => 
+        (r.route_code || "").trim() === sheetKey.trim() || 
+        (r.route_name || "").trim() === sheetKey.trim()
+    );
+    
+    return dateRange.map(d => {
+        const saved = savedByDate[d] || {};
+        // Xác định đơn giá: nếu ngày >= 18/12/2025 và chưa có giá đã lưu, sử dụng giá mới từ route
+        let unitPrice = saved.unit_price || 0;
+        if (d >= newPriceEffectiveDate && !saved.unit_price && matchingRoute) {
+            // Sử dụng giá mới từ RoutePrice cho ngày >= 18/12/2025
+            unitPrice = matchingRoute.unit_price || 0;
+        } else if (saved.unit_price !== undefined && saved.unit_price !== null) {
+            // Nếu đã có giá đã lưu, sử dụng giá đó
+            unitPrice = saved.unit_price;
+        }
+        
+        const base = {
+            sheet_name: sheetKey,
+            route_code: saved.route_code || sheetKey,
+            route_name: saved.route_name || sheetKey,
+            route_type: saved.route_type || "",
+            itinerary: saved.itinerary || "",
+            date: d,
+            license_plate: "",
+            driver_name: "",
+            trip_code: saved.trip_code || "",
+            notes: saved.notes || "",
+            status: "Onl", // Mặc định là Onl
+            distance_km: saved.distance_km || 0,
+            unit_price: unitPrice,
+            bridge_fee: saved.bridge_fee || 0,
+            loading_fee: saved.loading_fee || 0
+        };
+        const row = {...base, ...saved};
+        // Đảm bảo status có giá trị
+        if (!row.status) row.status = "Onl";
+        row.total_amount = calculateTotal(row);
+        return row;
+    });
+}
+
+function indexSaved(sheetKey) {
+    const saved = savedDetails && savedDetails[sheetKey] ? savedDetails[sheetKey] : [];
+    const idx = {};
+    saved.forEach(item => {
+        if (item.date) idx[item.date] = item;
+    });
+    return idx;
+}
+
+function renderTabs() {
+    const tabContainer = document.getElementById('sheetTabs');
+    tabContainer.innerHTML = '';
+    
+    // Sắp xếp sheets: Bộ lọc ở đầu, Tăng cường ở cuối danh sách tuyến, Total ở cuối cùng
+    const sheetKeys = Object.keys(sheetData);
+    const sortedKeys = sheetKeys.sort((a, b) => {
+        const aIsBoLoc = a === "Bộ lọc";
+        const bIsBoLoc = b === "Bộ lọc";
+        const aIsTangCuong = (a || "").toUpperCase().includes("TĂNG CƯỜNG");
+        const bIsTangCuong = (b || "").toUpperCase().includes("TĂNG CƯỜNG");
+        const aIsTotal = a === "Total";
+        const bIsTotal = b === "Total";
+        
+        // Bộ lọc luôn ở đầu
+        if (aIsBoLoc && !bIsBoLoc) return -1;
+        if (!aIsBoLoc && bIsBoLoc) return 1;
+        
+        // Total luôn ở cuối
+        if (aIsTotal && !bIsTotal) return 1;
+        if (!aIsTotal && bIsTotal) return -1;
+        
+        // Tăng cường ở cuối (trước Total)
+        if (aIsTangCuong && !bIsTangCuong && !bIsTotal) return 1;
+        if (!aIsTangCuong && bIsTangCuong && !aIsTotal) return -1;
+        
+        // Các sheet khác giữ nguyên thứ tự
+        return 0;
+    });
+    
+    sortedKeys.forEach(key => {
+        const tab = document.createElement('div');
+        tab.className = `sheet-tab ${key === activeSheetKey ? 'active' : ''}`;
+        tab.textContent = key;
+        tab.onclick = () => {
+            activeSheetKey = key;
+            renderTabs();
+            renderActiveSheet();
+        };
+        tabContainer.appendChild(tab);
+    });
+}
+
+function renderActiveSheet() {
+    if (!activeSheetKey) return;
+    const rows = sheetData[activeSheetKey] || [];
+    const container = document.getElementById('sheetContainer');
+    const meta = document.getElementById('sheetMeta');
+
+    // Kiểm tra nếu là sheet "Bộ lọc"
+    const isBoLocSheet = activeSheetKey === "Bộ lọc";
+    
+    // Kiểm tra nếu là sheet "Total"
+    const isTotalSheet = activeSheetKey === "Total";
+    
+    // Kiểm tra nếu là sheet "Tăng cường"
+    const isTangCuong = (activeSheetKey || "").toUpperCase().includes("TĂNG CƯỜNG");
+    
+    // Render sheet Bộ lọc
+    if (isBoLocSheet) {
+        meta.innerHTML = `
+            <span class="tag"><i class="fas fa-filter"></i> Tìm kiếm và lọc dữ liệu</span>
+        `;
+        renderFilterSheet().then(html => {
+            container.innerHTML = html;
+        });
+        return;
+    }
+    
+    // Render sheet Total
+    if (isTotalSheet) {
+        meta.innerHTML = `
+            <span class="tag"><i class="fas fa-calculator"></i> Tổng hợp doanh thu</span>
+            <span class="tag"><i class="fas fa-chart-line"></i> Tất cả tuyến</span>
+        `;
+        container.innerHTML = renderTotalSheet();
+        return;
+    }
+    
+    const sample = rows[0] || {};
+    if (!isTangCuong) {
+        meta.innerHTML = `
+            <span class="tag"><i class="fas fa-route"></i> ${sample.route_code || activeSheetKey}</span>
+            <span class="tag"><i class="fas fa-info-circle"></i> ${sample.route_type || '---'}</span>
+            <span class="tag"><i class="fas fa-calendar-day"></i> ${dateRange.length} ngày</span>
+        `;
+    } else {
+        meta.innerHTML = `
+            <span class="tag"><i class="fas fa-route"></i> ${sample.route_code || activeSheetKey}</span>
+            <span class="tag"><i class="fas fa-info-circle"></i> ${sample.route_type || 'Tăng cường'}</span>
+            <span class="tag"><i class="fas fa-list"></i> ${rows.length} chuyến</span>
+        `;
+    }
+
+    const tableHtml = `
+        <div class="table-wrapper">
+        <table class="data-table ${isTangCuong ? 'sheet-tang-cuong' : ''}">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Ngày</th>
+                    <th>Biển số xe</th>
+                    <th>Mã tuyến</th>
+                    ${isTangCuong ? '<th>Loại tuyến</th>' : ''}
+                    ${!isTangCuong ? '<th class="status-column">Status</th>' : ''}
+                    <th class="itinerary-column">Lộ trình</th>
+                    <th class="distance-column">Km chuyến</th>
+                    <th class="unit-price-column">Đơn giá</th>
+                    <th>Phí cầu đường</th>
+                    <th>Phí chờ tải</th>
+                    <th>Thành tiền</th>
+                    <th class="driver-column">Lái xe</th>
+                    <th>Mã chuyến</th>
+                    <th>Ghi chú</th>
+                    ${isTangCuong ? '<th>Thao tác</th>' : ''}
+                </tr>
+            </thead>
+            <tbody>
+                ${rows.length > 0 ? rows.map((row, idx) => renderRow(row, idx, isTangCuong)).join('') : ''}
+                ${renderTotalRow(rows, isTangCuong)}
+                ${isTangCuong ? renderAddButtonRow(isTangCuong) : ''}
+            </tbody>
+        </table>
+        </div>
+    `;
+    container.innerHTML = tableHtml;
+    bindEvents();
+    
+    // Điều chỉnh chiều cao cho tất cả textarea trong cột Lộ trình sau khi render
+    setTimeout(() => {
+        const itineraryTextareas = document.querySelectorAll('textarea[data-field="itinerary"]');
+        itineraryTextareas.forEach(textarea => {
+            autoResizeTextarea(textarea);
+        });
+        // Cập nhật dòng tổng sau khi render
+        updateTotalSummaryRow();
+    }, 100);
+}
+
+function renderRow(row, idx, isTangCuong = false) {
+    // Với Tăng cường, ngày có thể chọn được bằng date picker
+    let dateInput;
+    if (isTangCuong) {
+        let dateValue = ""; // Giá trị YYYY-MM-DD cho input date
+        let dateDisplay = ""; // Giá trị dd/mm/yyyy để hiển thị
+        if (row.date) {
+            // Lấy giá trị YYYY-MM-DD
+            if (typeof row.date === 'string' && row.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                dateValue = row.date;
+            } else {
+                dateValue = new Date(row.date).toISOString().split('T')[0];
+            }
+            dateDisplay = formatDateToDDMMYYYY(dateValue);
+        } else {
+            // Mặc định dùng ngày đầu tiên trong dateRange
+            dateValue = dateRange[0] || timekeepingTable.from_date.split('T')[0];
+            dateDisplay = formatDateToDDMMYYYY(dateValue);
+        }
+        // Lấy min và max date để validate
+        const minDate = timekeepingTable.from_date.includes('T') ? timekeepingTable.from_date.split('T')[0] : timekeepingTable.from_date;
+        const maxDate = timekeepingTable.to_date.includes('T') ? timekeepingTable.to_date.split('T')[0] : timekeepingTable.to_date;
+        dateInput = `
+            <div class="date-picker-wrapper" style="position: relative; display: inline-block; width: 100%; min-height: 32px;">
+                <input type="date" 
+                       class="date-picker-hidden" 
+                       data-field="date" 
+                       data-row="${idx}" 
+                       value="${dateValue}" 
+                       min="${minDate}" 
+                       max="${maxDate}"
+                       style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10; pointer-events: auto;">
+                <input type="text" 
+                       class="input-control date-display" 
+                       data-field="date-display" 
+                       data-row="${idx}" 
+                       value="${dateDisplay}" 
+                       readonly
+                       style="max-width: 120px; cursor: pointer; background-color: white; pointer-events: none; position: relative; z-index: 1;"
+                       title="Click để chọn ngày">
+            </div>
+        `;
+    } else {
+        const dateLabel = new Date(row.date).toLocaleDateString('vi-VN');
+        dateInput = dateLabel;
+    }
+    
+    const deleteButton = isTangCuong ? `
+        <td>
+            <button class="btn btn-secondary" onclick="deleteTangCuongRow(${idx})" style="padding: 6px 12px; font-size: 12px;">
+                <i class="fas fa-trash"></i> Xóa
+            </button>
+        </td>
+    ` : '';
+    
+    return `
+    <tr data-row="${idx}">
+        <td>${idx + 1}</td>
+        <td>${dateInput}</td>
+        <td>
+            <select class="select-control" data-field="license_plate" data-row="${idx}">
+                ${buildOptions(vehicles, "license_plate", "license_plate", row.license_plate, "-- Chọn xe --")}
+            </select>
+        </td>
+        <td><input class="input-control" data-field="route_code" data-row="${idx}" value="${row.route_code || ''}" readonly></td>
+        ${isTangCuong ? `
+        <td>
+            <select class="select-control" data-field="route_type" data-row="${idx}">
+                <option value="">-- Chọn loại tuyến --</option>
+                <option value="Nội thành" ${(row.route_type || '') === 'Nội thành' ? 'selected' : ''}>Nội thành</option>
+                <option value="Tăng cường Nội Tỉnh" ${(row.route_type || '') === 'Tăng cường Nội Tỉnh' ? 'selected' : ''}>Tăng cường Nội Tỉnh</option>
+                <option value="Tăng cường Liên Tỉnh" ${(row.route_type || '') === 'Tăng cường Liên Tỉnh' ? 'selected' : ''}>Tăng cường Liên Tỉnh</option>
+            </select>
+        </td>
+        ` : ''}
+        ${!isTangCuong ? `
+        <td>
+            <select class="select-control" data-field="status" data-row="${idx}">
+                <option value="Onl" ${(row.status || 'Onl') === 'Onl' ? 'selected' : ''}>Onl</option>
+                <option value="OFF" ${(row.status || 'Onl') === 'OFF' ? 'selected' : ''}>OFF</option>
+            </select>
+        </td>
+        ` : ''}
+        <td><textarea class="input-control" data-field="itinerary" data-row="${idx}" rows="2">${row.itinerary || ''}</textarea></td>
+        <td><input type="number" step="0.01" class="input-control number-cell" data-field="distance_km" data-row="${idx}" value="${row.distance_km ?? 0}"></td>
+        <td><input type="number" step="0.01" class="input-control number-cell" data-field="unit_price" data-row="${idx}" value="${row.unit_price ?? 0}"></td>
+        <td><input type="number" step="0.01" class="input-control number-cell" data-field="bridge_fee" data-row="${idx}" value="${row.bridge_fee ?? 0}"></td>
+        <td><input type="number" step="0.01" class="input-control number-cell" data-field="loading_fee" data-row="${idx}" value="${row.loading_fee ?? 0}"></td>
+        <td class="total-cell" data-total="${activeSheetKey}-${idx}">${formatNumber(row.total_amount || 0)}</td>
+        <td>
+            <select class="select-control" data-field="driver_name" data-row="${idx}">
+                ${buildOptions(employees, "name", "name", row.driver_name, "-- Chọn lái xe --")}
+            </select>
+        </td>
+        <td><input class="input-control" data-field="trip_code" data-row="${idx}" value="${row.trip_code || ''}" placeholder="Nhập mã chuyến"></td>
+        <td><input class="input-control" data-field="notes" data-row="${idx}" value="${row.notes || ''}" placeholder="Nhập ghi chú"></td>
+        ${deleteButton}
+    </tr>
+    `;
+}
+
+function renderTotalRow(rows, isTangCuong = false) {
+    // Tính tổng thành tiền của tất cả các dòng
+    const totalAmount = (rows || []).reduce((sum, row) => {
+        return sum + (parseFloat(row.total_amount || 0) || 0);
+    }, 0);
+    
+    // Đếm số cột: STT(1), Ngày(2), Biển số xe(3), Mã tuyến(4), [Loại tuyến(5) nếu Tăng cường hoặc Status(5) nếu không phải Tăng cường], Lộ trình(6), Km chuyến(7), Đơn giá(8), Phí cầu đường(9), Phí chờ tải(10)
+    // Thành tiền là cột thứ 11
+    const colSpanBeforeTotal = 10; // Số cột trước cột "Thành tiền" (giống nhau cho cả hai loại sheet)
+    // Sau Thành tiền: Lái xe, Mã chuyến, Ghi chú, [Thao tác nếu Tăng cường]
+    const colSpanAfterTotal = isTangCuong ? 4 : 3; // Số cột sau cột "Thành tiền"
+    
+    return `
+    <tr class="total-summary-row">
+        <td colspan="${colSpanBeforeTotal}" style="text-align: right; font-weight: 700; padding: 12px 8px; background-color: #f8f9fa; border-top: 2px solid #667eea;">
+            <strong>TỔNG CỘNG:</strong>
+        </td>
+        <td class="total-cell total-summary-cell" style="font-weight: 700; font-size: 14px; padding: 12px 8px; background-color: #f8f9fa; border-top: 2px solid #667eea; text-align: right;">
+            ${formatInteger(totalAmount)}
+        </td>
+        <td colspan="${colSpanAfterTotal}" style="background-color: #f8f9fa; border-top: 2px solid #667eea;"></td>
+    </tr>
+    `;
+}
+
+function renderAddButtonRow(isTangCuong = false) {
+    // Tính tổng số cột: STT(1), Ngày(2), Biển số xe(3), Mã tuyến(4), Loại tuyến(5) [chỉ Tăng cường], Status(5) [không Tăng cường], 
+    // Lộ trình(6), Km chuyến(7), Đơn giá(8), Phí cầu đường(9), Phí chờ tải(10), Thành tiền(11), Lái xe(12), Mã chuyến(13), Ghi chú(14), Thao tác(15) [chỉ Tăng cường]
+    // Với Tăng cường: 14 cột (không có Status, có Loại tuyến và Thao tác)
+    // Không Tăng cường: 13 cột (có Status, không có Loại tuyến và Thao tác)
+    const totalCols = isTangCuong ? 14 : 13;
+    
+    return `
+    <tr class="add-button-row">
+        <td colspan="${totalCols}" style="padding: 20px; text-align: center; background-color: #f8f9fa; border-top: 1px solid #e9ecef;">
+            <button class="btn btn-primary" onclick="addTangCuongRow()" id="addTangCuongBtn" style="padding: 12px 24px; font-size: 14px;">
+                <i class="fas fa-plus"></i> Tạo chuyến tăng cường +
+            </button>
+        </td>
+    </tr>
+    `;
+}
+
+// Tính tổng số tiền của một sheet
+function getSheetTotal(sheetKey) {
+    const rows = sheetData[sheetKey] || [];
+    return rows.reduce((sum, row) => {
+        return sum + (parseFloat(row.total_amount || 0) || 0);
+    }, 0);
+}
+
+// Lấy danh sách tất cả các sheet tuyến (không bao gồm Total)
+function getAllRouteSheets() {
+    const allSheets = Object.keys(sheetData).filter(key => key !== "Total");
+    
+    // Sắp xếp: Tăng cường ở cuối
+    return allSheets.sort((a, b) => {
+        const aIsTangCuong = (a || "").toUpperCase().includes("TĂNG CƯỜNG");
+        const bIsTangCuong = (b || "").toUpperCase().includes("TĂNG CƯỜNG");
+        
+        if (aIsTangCuong && !bIsTangCuong) return 1;
+        if (!aIsTangCuong && bIsTangCuong) return -1;
+        return 0;
+    });
+}
+
+// Render sheet Total
+function renderTotalSheet() {
+    const routeSheets = getAllRouteSheets();
+    
+    // Tính tổng cộng
+    const tongCong = routeSheets.reduce((sum, sheetKey) => {
+        return sum + getSheetTotal(sheetKey);
+    }, 0);
+    
+    // Tính các khoản chiết khấu và thuế
+    const chietKhauGHN = tongCong * 0.05;
+    const chietKhauVoGia = (tongCong - chietKhauGHN) * 0.05;
+    const conLai = tongCong - chietKhauGHN - chietKhauVoGia;
+    const thueGTGT = conLai * 0.08;
+    const tongDoanhThu = conLai + thueGTGT;
+    
+    return `
+        <div class="table-wrapper">
+            <table class="data-table" style="max-width: 800px; margin: 0 auto;">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">STT</th>
+                        <th>Tên tuyến</th>
+                        <th style="width: 150px; text-align: right;">Số tiền</th>
+                        <th style="width: 120px;">Chi tiết</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${routeSheets.map((sheetKey, idx) => {
+                        const sheetTotal = getSheetTotal(sheetKey);
+                        return `
+                            <tr>
+                                <td style="text-align: center;">${idx + 1}</td>
+                                <td><strong>${sheetKey}</strong></td>
+                                <td style="text-align: right; font-weight: 600;">${formatInteger(sheetTotal)}</td>
+                                <td style="text-align: center;">
+                                    <button class="btn btn-secondary" onclick="navigateToSheet('${sheetKey}')" style="padding: 6px 12px; font-size: 12px;">
+                                        <i class="fas fa-eye"></i> Chi tiết
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                    <tr class="total-summary-row">
+                        <td colspan="2" style="text-align: right; font-weight: 700; padding: 12px 8px; background-color: #f8f9fa; border-top: 2px solid #667eea;">
+                            <strong>Tổng cộng</strong>
+                        </td>
+                        <td class="total-summary-cell" style="font-weight: 700; font-size: 14px; padding: 12px 8px; background-color: #f8f9fa; border-top: 2px solid #667eea; text-align: right;">
+                            ${formatInteger(tongCong)}
+                        </td>
+                        <td style="background-color: #f8f9fa; border-top: 2px solid #667eea;"></td>
+                    </tr>
+                    <tr class="total-summary-row">
+                        <td colspan="2" style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #fff3cd; border-top: 1px solid #ffc107;">
+                            Chiết khấu GHN (5%)
+                        </td>
+                        <td style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #fff3cd; border-top: 1px solid #ffc107;">
+                            ${formatInteger(chietKhauGHN)}
+                        </td>
+                        <td style="background-color: #fff3cd; border-top: 1px solid #ffc107;"></td>
+                    </tr>
+                    <tr class="total-summary-row">
+                        <td colspan="2" style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #fff3cd; border-top: 1px solid #ffc107;">
+                            Chiết khấu Võ Gia (5%)
+                        </td>
+                        <td style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #fff3cd; border-top: 1px solid #ffc107;">
+                            ${formatInteger(chietKhauVoGia)}
+                        </td>
+                        <td style="background-color: #fff3cd; border-top: 1px solid #ffc107;"></td>
+                    </tr>
+                    <tr class="total-summary-row">
+                        <td colspan="2" style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #d1ecf1; border-top: 1px solid #17a2b8;">
+                            Còn lại
+                        </td>
+                        <td style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #d1ecf1; border-top: 1px solid #17a2b8;">
+                            ${formatInteger(conLai)}
+                        </td>
+                        <td style="background-color: #d1ecf1; border-top: 1px solid #17a2b8;"></td>
+                    </tr>
+                    <tr class="total-summary-row">
+                        <td colspan="2" style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #d4edda; border-top: 1px solid #28a745;">
+                            Thuế GTGT 8%
+                        </td>
+                        <td style="text-align: right; font-weight: 600; padding: 10px 8px; background-color: #d4edda; border-top: 1px solid #28a745;">
+                            ${formatInteger(thueGTGT)}
+                        </td>
+                        <td style="background-color: #d4edda; border-top: 1px solid #28a745;"></td>
+                    </tr>
+                    <tr class="total-summary-row">
+                        <td colspan="2" style="text-align: right; font-weight: 700; padding: 15px 8px; background-color: #667eea; color: white; border-top: 3px solid #5568d3; font-size: 16px;">
+                            <strong>Tổng doanh thu (Bao gồm VAT)</strong>
+                        </td>
+                        <td style="text-align: right; font-weight: 700; padding: 15px 8px; background-color: #667eea; color: white; border-top: 3px solid #5568d3; font-size: 16px;">
+                            <strong>${formatInteger(tongDoanhThu)}</strong>
+                        </td>
+                        <td style="background-color: #667eea; border-top: 3px solid #5568d3;"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+// Biến lưu kết quả lọc
+let filteredResults = [];
+
+async function renderFilterSheet() {
+    // Lấy danh sách lái xe, mã tuyến, biển số từ dữ liệu
+    const allDetails = await getAllTimekeepingDetails();
+    
+    // Lấy danh sách unique cho dropdowns
+    const uniqueDrivers = [...new Set(allDetails.map(d => d.driver_name).filter(Boolean))].sort();
+    const uniqueRouteCodes = [...new Set(allDetails.map(d => d.route_code).filter(Boolean))].sort();
+    const uniqueLicensePlates = [...new Set(allDetails.map(d => d.license_plate).filter(Boolean))].sort();
+    
+    return `
+        <div class="filter-section">
+            <div class="filter-form">
+                <h3 style="margin-bottom: 20px; color: #2c3e50;">
+                    <i class="fas fa-filter"></i> Bộ lọc tìm kiếm
+                </h3>
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label for="filterDriver">Lái xe:</label>
+                        <select id="filterDriver" class="select-control">
+                            <option value="">Tất cả</option>
+                            ${uniqueDrivers.map(driver => `<option value="${driver}">${driver}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="filterRouteCode">Mã tuyến:</label>
+                        <select id="filterRouteCode" class="select-control">
+                            <option value="">Tất cả</option>
+                            ${uniqueRouteCodes.map(route => `<option value="${route}">${route}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="filterLicensePlate">Biển số xe:</label>
+                        <select id="filterLicensePlate" class="select-control">
+                            <option value="">Tất cả</option>
+                            ${uniqueLicensePlates.map(plate => `<option value="${plate}">${plate}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="filter-actions">
+                        <button class="btn btn-primary" onclick="applyFilter()">
+                            <i class="fas fa-search"></i> Tìm kiếm
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetFilter()">
+                            <i class="fas fa-redo"></i> Đặt lại
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="filterResults" class="filter-results" style="margin-top: 30px;">
+                <div class="no-results" style="text-align: center; padding: 40px; color: #7f8c8d;">
+                    <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
+                    <p>Vui lòng chọn điều kiện lọc và nhấn "Tìm kiếm" để xem kết quả</p>
+                </div>
+            </div>
+        </div>
+        
+        <style>
+        .filter-section {
+            padding: 20px;
+        }
+        
+        .filter-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .filter-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            align-items: end;
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .filter-group label {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 13px;
+        }
+        
+        .filter-actions {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        
+        .filter-results {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        
+        .filter-results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #ecf0f1;
+        }
+        
+        .filter-results-header h4 {
+            margin: 0;
+            color: #2c3e50;
+        }
+        
+        .filter-results-count {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        </style>
+    `;
+}
+
+async function getAllTimekeepingDetails() {
+    // Lấy tất cả dữ liệu từ API (dữ liệu đã lưu trong database)
+    try {
+        const response = await fetch(`/api/timekeeping-v1/${timekeepingTable.id}/filter`);
+        const result = await response.json();
+        if (result.success) {
+            return result.data || [];
+        }
+    } catch (error) {
+        console.error('Error loading timekeeping details:', error);
+    }
+    return [];
+}
+
+async function applyFilter() {
+    const driver = document.getElementById('filterDriver')?.value || "";
+    const routeCode = document.getElementById('filterRouteCode')?.value || "";
+    const licensePlate = document.getElementById('filterLicensePlate')?.value || "";
+    
+    // Gọi API để lọc dữ liệu
+    try {
+        const params = new URLSearchParams();
+        if (driver) params.append('driver_name', driver);
+        if (routeCode) params.append('route_code', routeCode);
+        if (licensePlate) params.append('license_plate', licensePlate);
+        
+        const response = await fetch(`/api/timekeeping-v1/${timekeepingTable.id}/filter?${params.toString()}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            filteredResults = result.data || [];
+            renderFilterResults();
+        } else {
+            showToast(result.message || 'Có lỗi xảy ra khi lọc dữ liệu', 'error');
+        }
+    } catch (error) {
+        showToast('Có lỗi xảy ra: ' + error.message, 'error');
+    }
+}
+
+function resetFilter() {
+    document.getElementById('filterDriver').value = "";
+    document.getElementById('filterRouteCode').value = "";
+    document.getElementById('filterLicensePlate').value = "";
+    filteredResults = [];
+    document.getElementById('filterResults').innerHTML = `
+        <div class="no-results" style="text-align: center; padding: 40px; color: #7f8c8d;">
+            <i class="fas fa-search" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
+            <p>Vui lòng chọn điều kiện lọc và nhấn "Tìm kiếm" để xem kết quả</p>
+        </div>
+    `;
+}
+
+function renderFilterResults() {
+    const resultsDiv = document.getElementById('filterResults');
+    
+    if (!filteredResults || filteredResults.length === 0) {
+        resultsDiv.innerHTML = `
+            <div class="no-results" style="text-align: center; padding: 40px; color: #7f8c8d;">
+                <i class="fas fa-inbox" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
+                <p>Không tìm thấy dữ liệu phù hợp với điều kiện lọc</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sắp xếp theo Mã tuyến
+    const sortedResults = [...filteredResults].sort((a, b) => {
+        const routeA = (a.route_code || "").toLowerCase();
+        const routeB = (b.route_code || "").toLowerCase();
+        return routeA.localeCompare(routeB);
+    });
+    
+    const totalAmount = sortedResults.reduce((sum, item) => sum + (item.total_amount || 0), 0);
+    
+    resultsDiv.innerHTML = `
+        <div class="filter-results-header">
+            <div>
+                <h4><i class="fas fa-list"></i> Kết quả tìm kiếm</h4>
+                <div class="filter-results-count">Tìm thấy ${sortedResults.length} bản ghi</div>
+            </div>
+            <button class="btn btn-success" onclick="exportFilteredExcel()">
+                <i class="fas fa-file-excel"></i> Xuất Excel
+            </button>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Ngày</th>
+                        <th>Biển số xe</th>
+                        <th>Mã tuyến</th>
+                        <th>Status</th>
+                        <th>Lộ trình</th>
+                        <th>Km chuyến</th>
+                        <th>Đơn giá</th>
+                        <th>Phí cầu đường</th>
+                        <th>Phí chờ tải</th>
+                        <th>Thành tiền</th>
+                        <th>Lái xe</th>
+                        <th>Mã chuyến</th>
+                        <th>Ghi chú</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sortedResults.map((item, idx) => `
+                        <tr>
+                            <td style="text-align: center;">${idx + 1}</td>
+                            <td>${formatDateToDDMMYYYY(item.date)}</td>
+                            <td>${item.license_plate || ""}</td>
+                            <td>${item.route_code || ""}</td>
+                            <td style="text-align: center;">${item.status || "Onl"}</td>
+                            <td>${item.itinerary || ""}</td>
+                            <td style="text-align: right;">${formatNumber(item.distance_km || 0, 3)}</td>
+                            <td style="text-align: right;">${formatInteger(item.unit_price || 0)}</td>
+                            <td style="text-align: right;">${formatInteger(item.bridge_fee || 0)}</td>
+                            <td style="text-align: right;">${formatInteger(item.loading_fee || 0)}</td>
+                            <td style="text-align: right; font-weight: 600;">${formatInteger(item.total_amount || 0)}</td>
+                            <td>${item.driver_name || ""}</td>
+                            <td>${item.trip_code || ""}</td>
+                            <td>${item.notes || ""}</td>
+                        </tr>
+                    `).join('')}
+                    <tr class="total-summary-row">
+                        <td colspan="10" style="text-align: right; font-weight: 700; padding: 12px 8px; background-color: #f8f9fa; border-top: 2px solid #667eea;">
+                            <strong>Tổng cộng</strong>
+                        </td>
+                        <td class="total-summary-cell" style="font-weight: 700; font-size: 14px; padding: 12px 8px; background-color: #f8f9fa; border-top: 2px solid #667eea; text-align: right;">
+                            ${formatInteger(totalAmount)}
+                        </td>
+                        <td colspan="3" style="background-color: #f8f9fa; border-top: 2px solid #667eea;"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function exportFilteredExcel() {
+    const driver = document.getElementById('filterDriver')?.value || "";
+    const routeCode = document.getElementById('filterRouteCode')?.value || "";
+    const licensePlate = document.getElementById('filterLicensePlate')?.value || "";
+    
+    const params = new URLSearchParams();
+    if (driver) params.append('driver_name', driver);
+    if (routeCode) params.append('route_code', routeCode);
+    if (licensePlate) params.append('license_plate', licensePlate);
+    
+    window.location.href = `/api/timekeeping-v1/${timekeepingTable.id}/export-filtered-excel?${params.toString()}`;
+}
+
+// Hàm điều hướng đến sheet cụ thể
+function navigateToSheet(sheetKey) {
+    if (sheetData[sheetKey] !== undefined) {
+        activeSheetKey = sheetKey;
+        renderTabs();
+        renderActiveSheet();
+        // Scroll to top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
+function autoResizeTextarea(textarea) {
+    // Reset height để tính toán chính xác
+    textarea.style.height = 'auto';
+    // Set height dựa trên scrollHeight, tối thiểu 50px
+    textarea.style.height = Math.max(50, textarea.scrollHeight) + 'px';
+}
+
+function bindEvents() {
+    const inputs = document.querySelectorAll('[data-field]');
+    inputs.forEach(el => {
+        const field = el.dataset.field;
+        const fields = ["distance_km","unit_price","bridge_fee","loading_fee","itinerary","license_plate","driver_name","route_type","trip_code","notes","date","status"];
+        if (fields.includes(field)) {
+            el.addEventListener('input', onCellChange);
+            el.addEventListener('change', onCellChange);
+            
+            // Tự động điều chỉnh chiều cao cho textarea trong cột Lộ trình
+            if (field === 'itinerary' && el.tagName === 'TEXTAREA') {
+                autoResizeTextarea(el);
+                el.addEventListener('input', function() {
+                    autoResizeTextarea(this);
+                });
+            }
+        }
+    });
+    
+    // Xử lý date picker cho sheet Tăng cường
+    const datePickers = document.querySelectorAll('.date-picker-hidden');
+    datePickers.forEach(datePicker => {
+        const rowIndex = Number(datePicker.dataset.row);
+        const displayInput = document.querySelector(`input[data-field="date-display"][data-row="${rowIndex}"]`);
+        const wrapper = datePicker.closest('.date-picker-wrapper');
+        
+        // Khi date picker thay đổi, cập nhật display và lưu vào data
+        datePicker.addEventListener('change', function() {
+            const dateValue = this.value; // YYYY-MM-DD
+            if (dateValue && displayInput) {
+                const formattedDate = formatDateToDDMMYYYY(dateValue);
+                displayInput.value = formattedDate;
+                
+                // Lưu vào sheetData và trigger validation
+                const rows = sheetData[activeSheetKey];
+                if (rows && rows[rowIndex]) {
+                    rows[rowIndex].date = dateValue;
+                }
+                
+                // Trigger onCellChange để xử lý validation
+                const changeEvent = new Event('change', { bubbles: true });
+                datePicker.dispatchEvent(changeEvent);
+            }
+        });
+        
+        // Đảm bảo date picker có thể nhận click trực tiếp
+        datePicker.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // Nếu trình duyệt hỗ trợ showPicker, sử dụng nó
+            if (this.showPicker) {
+                try {
+                    this.showPicker();
+                } catch (err) {
+                    // Fallback nếu showPicker không hoạt động
+                    this.click();
+                }
+            }
+        });
+        
+        // Khi click vào wrapper hoặc display input, trigger click vào date picker
+        if (wrapper) {
+            wrapper.addEventListener('click', function(e) {
+                // Chỉ trigger nếu click không phải vào date picker trực tiếp
+                if (e.target !== datePicker) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (datePicker.showPicker) {
+                        try {
+                            datePicker.showPicker();
+                        } catch (err) {
+                            datePicker.click();
+                        }
+                    } else {
+                        datePicker.click();
+                    }
+                }
+            });
+        }
+        
+        // Ngăn chặn nhập tay vào display input
+        if (displayInput) {
+            displayInput.addEventListener('keydown', function(e) {
+                e.preventDefault();
+            });
+            
+            displayInput.addEventListener('paste', function(e) {
+                e.preventDefault();
+            });
+        }
+    });
+    
+    // Áp dụng lock/unlock cho tất cả các dòng sau khi bind events
+    const rows = sheetData[activeSheetKey] || [];
+    rows.forEach((row, idx) => {
+        applyStatusLock(idx, row.status || "Onl");
+    });
+    
+    // Điều chỉnh chiều cao cho tất cả textarea trong cột Lộ trình sau khi render
+    const itineraryTextareas = document.querySelectorAll('textarea[data-field="itinerary"]');
+    itineraryTextareas.forEach(textarea => {
+        autoResizeTextarea(textarea);
+    });
+}
+
+function onCellChange(event) {
+    const field = event.target.dataset.field;
+    const rowIndex = Number(event.target.dataset.row);
+    const value = event.target.value;
+    const rows = sheetData[activeSheetKey];
+    if (!rows || !rows[rowIndex]) return;
+
+    // Xử lý thay đổi status
+    if (field === "status") {
+        rows[rowIndex][field] = value;
+        applyStatusLock(rowIndex, value);
+        // Nếu chuyển sang OFF, set revenue về 0
+        if (value === "OFF") {
+            rows[rowIndex].total_amount = 0;
+            updateTotalCell(rowIndex, 0);
+        } else if (value === "Onl") {
+            // Nếu chuyển sang Onl, tính lại revenue
+            rows[rowIndex].total_amount = calculateTotal(rows[rowIndex]);
+            updateTotalCell(rowIndex, rows[rowIndex].total_amount);
+        }
+        return;
+    }
+
+    // Kiểm tra nếu status là OFF thì không cho chỉnh sửa
+    const currentStatus = rows[rowIndex].status || "Onl";
+    if (currentStatus === "OFF") {
+        // Không cho chỉnh sửa các field khi status = OFF
+        event.target.value = rows[rowIndex][field] || "";
+        return;
+    }
+
+    if (["distance_km","unit_price","bridge_fee","loading_fee"].includes(field)) {
+        rows[rowIndex][field] = parseFloat(value || 0) || 0;
+        rows[rowIndex].total_amount = calculateTotal(rows[rowIndex]);
+        updateTotalCell(rowIndex, rows[rowIndex].total_amount);
+    } else if (field === "route_type") {
+        rows[rowIndex][field] = value;
+        rows[rowIndex].total_amount = calculateTotal(rows[rowIndex]);
+        updateTotalCell(rowIndex, rows[rowIndex].total_amount);
+    } else if (field === "date") {
+        // Xử lý ngày cho sheet Tăng cường (date picker trả về YYYY-MM-DD trực tiếp)
+        if (value && value.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            // Validate min/max date
+            const minDate = timekeepingTable.from_date.includes('T') ? timekeepingTable.from_date.split('T')[0] : timekeepingTable.from_date;
+            const maxDate = timekeepingTable.to_date.includes('T') ? timekeepingTable.to_date.split('T')[0] : timekeepingTable.to_date;
+            if (value < minDate || value > maxDate) {
+                showToast("error", `Ngày phải nằm trong khoảng ${formatDateToDDMMYYYY(minDate)} - ${formatDateToDDMMYYYY(maxDate)}`);
+                // Khôi phục giá trị cũ
+                const oldDate = rows[rowIndex][field] || dateRange[0] || minDate;
+                event.target.value = oldDate;
+                // Cập nhật display
+                const displayInput = document.querySelector(`input[data-field="date-display"][data-row="${rowIndex}"]`);
+                if (displayInput) {
+                    displayInput.value = formatDateToDDMMYYYY(oldDate);
+                }
+                return;
+            }
+            rows[rowIndex][field] = value; // Lưu dạng YYYY-MM-DD
+            // Cập nhật display input
+            const displayInput = document.querySelector(`input[data-field="date-display"][data-row="${rowIndex}"]`);
+            if (displayInput) {
+                displayInput.value = formatDateToDDMMYYYY(value);
+            }
+        }
+    } else {
+        rows[rowIndex][field] = value;
+    }
+
+    // Copy dòng 1 xuống các dòng dưới nếu đang chỉnh dòng đầu tiên (chỉ cho sheet không phải Tăng cường)
+    const isTangCuong = (activeSheetKey || "").toUpperCase().includes("TĂNG CƯỜNG");
+    if (!isTangCuong) {
+        const copyableFields = ["license_plate","itinerary","distance_km","unit_price","bridge_fee","loading_fee","driver_name","route_type","trip_code","notes"];
+        if (rowIndex === 0 && copyableFields.includes(field)) {
+            copyFirstRowDown(field);
+        }
+    }
+}
+
+function updateTotalCell(rowIndex, total) {
+    const cell = document.querySelector(`[data-total="${activeSheetKey}-${rowIndex}"]`);
+    if (cell) {
+        cell.textContent = formatNumber(total || 0);
+    }
+    // Cập nhật dòng tổng
+    updateTotalSummaryRow();
+    // Nếu đang xem sheet Total, cập nhật lại
+    if (activeSheetKey === "Total") {
+        renderActiveSheet();
+    }
+}
+
+function updateTotalSummaryRow() {
+    // Không cập nhật nếu đang ở sheet Total
+    if (activeSheetKey === "Total") return;
+    
+    const rows = sheetData[activeSheetKey] || [];
+    const totalAmount = rows.reduce((sum, row) => {
+        return sum + (parseFloat(row.total_amount || 0) || 0);
+    }, 0);
+    
+    const totalCell = document.querySelector('.total-summary-cell');
+    if (totalCell) {
+        totalCell.textContent = formatInteger(totalAmount);
+    }
+}
+
+function applyStatusLock(rowIndex, status) {
+    // Chỉ áp dụng cho sheet không phải Tăng cường
+    const isTangCuong = (activeSheetKey || "").toUpperCase().includes("TĂNG CƯỜNG");
+    if (isTangCuong) return;
+    
+    const row = document.querySelector(`tr[data-row="${rowIndex}"]`);
+    if (!row) return;
+    
+    // Danh sách các field cần lock/unlock
+    const fieldsToLock = ["license_plate", "itinerary", "distance_km", "unit_price", "bridge_fee", "loading_fee", "driver_name", "trip_code", "notes"];
+    
+    fieldsToLock.forEach(field => {
+        const input = row.querySelector(`[data-field="${field}"]`);
+        if (input) {
+            if (status === "OFF") {
+                input.disabled = true;
+            } else {
+                input.disabled = false;
+            }
+        }
+    });
+}
+
+function copyFirstRowDown(field) {
+    const rows = sheetData[activeSheetKey];
+    if (!rows || rows.length === 0) return;
+    const first = rows[0];
+    const fieldsToCopy = field ? [field] : ["license_plate","itinerary","distance_km","unit_price","bridge_fee","loading_fee","driver_name","route_type","trip_code","notes"];
+
+    rows.forEach((row, idx) => {
+        if (idx === 0) return;
+        fieldsToCopy.forEach(f => {
+            if (row[f] === "" || row[f] === null || row[f] === undefined || row[f] === 0) {
+                row[f] = first[f];
+                const input = document.querySelector(`[data-field="${f}"][data-row="${idx}"]`);
+                if (input) input.value = first[f] ?? '';
+            }
+        });
+        row.total_amount = calculateTotal(row);
+        updateTotalCell(idx, row.total_amount);
+    });
+    // Cập nhật dòng tổng sau khi copy
+    updateTotalSummaryRow();
+}
+
+function calculateTotal(row) {
+    // Nếu status là OFF, revenue = 0
+    if ((row.status || "Onl") === "OFF") {
+        return 0;
+    }
+    // Nếu Loại tuyến = "Nội thành" → Thành tiền = 227273 đ (hai trăm hai mươi bảy nghìn hai trăm bảy mươi ba đồng)
+    if ((row.route_type || "") === "Nội thành") {
+        return 227273;
+    }
+    // Các loại tuyến khác: tính theo công thức hiện tại
+    const km = parseFloat(row.distance_km || 0) || 0;
+    const unit = parseFloat(row.unit_price || 0) || 0;
+    const bridge = parseFloat(row.bridge_fee || 0) || 0;
+    const loading = parseFloat(row.loading_fee || 0) || 0;
+    return km * unit + bridge + loading;
+}
+
+function formatNumber(value) {
+    return new Intl.NumberFormat('vi-VN').format(value || 0);
+}
+
+// Format số nguyên với dấu "." phân tách hàng nghìn (không có phần thập phân)
+function formatInteger(value) {
+    const num = Math.round(parseFloat(value || 0));
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+async function saveCurrentSheet() {
+    if (!activeSheetKey) return;
+    // Không lưu sheet Total
+    if (activeSheetKey === "Total") {
+        showToast("error", "Sheet Total không thể lưu. Vui lòng chọn sheet tuyến để lưu.");
+        return;
+    }
+    setLoading(true);
+    // Đảm bảo total_amount = 0 nếu status = OFF
+    const entries = sheetData[activeSheetKey].map(row => {
+        const entry = {...row};
+        if ((entry.status || "Onl") === "OFF") {
+            entry.total_amount = 0;
+        }
+        return entry;
+    });
+    const payload = {
+        scope: "sheet",
+        sheet_name: activeSheetKey,
+        entries: entries
+    };
+    await sendSave(payload, `Sheet ${activeSheetKey} đã lưu`);
+    setLoading(false);
+}
+
+async function saveAllSheets() {
+    setLoading(true);
+    // Đảm bảo total_amount = 0 nếu status = OFF
+    // Bỏ qua sheet Total
+    const allEntries = Object.keys(sheetData)
+        .filter(key => key !== "Total")
+        .flatMap(key => 
+            sheetData[key].map(row => {
+                const entry = {...row, sheet_name: key};
+                if ((entry.status || "Onl") === "OFF") {
+                    entry.total_amount = 0;
+                }
+                return entry;
+            })
+        );
+    const payload = {
+        scope: "all",
+        entries: allEntries
+    };
+    await sendSave(payload, "Lưu toàn bộ thành công");
+    setLoading(false);
+}
+
+async function sendSave(payload, successMsg) {
+    try {
+        const res = await fetch(`/api/timekeeping-v1/${timekeepingTable.id}/save`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast("success", successMsg || "Đã lưu");
+        } else {
+            showToast("error", data.message || "Lưu thất bại");
+        }
+    } catch (err) {
+        showToast("error", "Lỗi mạng hoặc máy chủ");
+    }
+}
+
+function setLoading(isLoading) {
+    [document.getElementById('saveSheetBtn'), document.getElementById('saveAllBtn')].forEach(btn => {
+        if (btn) btn.disabled = isLoading;
+    });
+}
+
+function showToast(type, message) {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-triangle'}"></i>${message}`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// Hàm thêm dòng mới cho sheet Tăng cường
+function addTangCuongRow() {
+    const isTangCuong = (activeSheetKey || "").toUpperCase().includes("TĂNG CƯỜNG");
+    if (!isTangCuong) return;
+    
+    const rows = sheetData[activeSheetKey] || [];
+    // Lấy ngày mặc định: ưu tiên ngày hiện tại (today), nếu không nằm trong khoảng hợp lệ thì dùng ngày đầu tiên trong dateRange
+    let defaultDate = "";
+    // Lấy ngày hiện tại
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+    
+    // Lấy min và max date để validate
+    const minDate = timekeepingTable.from_date.includes('T') ? timekeepingTable.from_date.split('T')[0] : timekeepingTable.from_date;
+    const maxDate = timekeepingTable.to_date.includes('T') ? timekeepingTable.to_date.split('T')[0] : timekeepingTable.to_date;
+    
+    // Kiểm tra nếu ngày hiện tại nằm trong khoảng hợp lệ
+    if (todayStr >= minDate && todayStr <= maxDate) {
+        defaultDate = todayStr;
+    } else if (dateRange && dateRange.length > 0) {
+        // Nếu ngày hiện tại không hợp lệ, dùng ngày đầu tiên trong dateRange
+        defaultDate = dateRange[0];
+    } else {
+        // Fallback: dùng from_date
+        defaultDate = minDate;
+    }
+    
+    // Tìm route info từ routes
+    const routeInfo = routes.find(r => 
+        (r.route_code || "").toUpperCase().includes("TĂNG CƯỜNG") ||
+        (r.route_name || "").toUpperCase().includes("TĂNG CƯỜNG")
+    ) || {};
+    
+    const newRow = {
+        sheet_name: activeSheetKey,
+        route_code: routeInfo.route_code || activeSheetKey,
+        route_name: routeInfo.route_name || activeSheetKey,
+        route_type: routeInfo.route_type || "Tăng cường",
+        itinerary: "",
+        date: defaultDate,
+        license_plate: "",
+        driver_name: "",
+        trip_code: "",
+        notes: "",
+        distance_km: 0,
+        unit_price: 0,
+        bridge_fee: 0,
+        loading_fee: 0,
+        total_amount: 0
+    };
+    
+    rows.push(newRow);
+    sheetData[activeSheetKey] = rows;
+    renderActiveSheet();
+    // Cập nhật dòng tổng sau khi render
+    setTimeout(() => {
+        updateTotalSummaryRow();
+        // Nếu đang xem sheet Total, cập nhật lại
+        if (activeSheetKey === "Total") {
+            renderActiveSheet();
+        }
+    }, 100);
+}
+
+// Hàm xóa dòng cho sheet Tăng cường
+function deleteTangCuongRow(rowIndex) {
+    const isTangCuong = (activeSheetKey || "").toUpperCase().includes("TĂNG CƯỜNG");
+    if (!isTangCuong) return;
+    
+    if (confirm("Bạn có chắc chắn muốn xóa chuyến tăng cường này?")) {
+        const rows = sheetData[activeSheetKey] || [];
+        rows.splice(rowIndex, 1);
+        sheetData[activeSheetKey] = rows;
+        renderActiveSheet();
+        // Cập nhật dòng tổng sau khi render
+        setTimeout(() => {
+            updateTotalSummaryRow();
+            // Nếu đang xem sheet Total, cập nhật lại
+            if (activeSheetKey === "Total") {
+                renderActiveSheet();
+            }
+        }, 100);
+    }
+}
+</script>
+</div>
+{% endblock %}
+

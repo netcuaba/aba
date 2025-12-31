@@ -3,11 +3,32 @@
 {% block title %}Bảng chấm công - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
-<h2>📅 Ngày chấm công</h2>
+<h2>📅 Bảng chấm công</h2>
 
+<!-- Tab chuyển đổi giữa 2 hình thức chấm công -->
+<div style="margin-bottom: 30px; border-bottom: 2px solid #e0e0e0;">
+    <div style="display: flex; gap: 10px;">
+        <button id="tab-by-date" 
+                onclick="switchTab('by-date')" 
+                class="tab-button active"
+                style="padding: 12px 24px; font-size: 16px; font-weight: bold; border: none; background: #3498db; color: white; border-radius: 8px 8px 0 0; cursor: pointer; transition: all 0.3s;">
+            📅 Chấm công theo ngày
+        </button>
+        <button id="tab-by-route" 
+                onclick="switchTab('by-route')" 
+                class="tab-button"
+                style="padding: 12px 24px; font-size: 16px; font-weight: bold; border: none; background: #95a5a6; color: white; border-radius: 8px 8px 0 0; cursor: pointer; transition: all 0.3s;">
+            🛣️ Chấm công theo tuyến
+        </button>
+    </div>
+</div>
+
+<!-- Phần chấm công theo ngày -->
+<div id="content-by-date" class="tab-content">
 <!-- Date Selector -->
 <div style="margin-bottom: 30px; padding: 15px; background: rgba(52, 152, 219, 0.1); border-radius: 8px;">
     <form method="get" action="/daily-new" style="display: inline-block;">
+        <input type="hidden" name="mode" value="by-date">
         <label for="selected_date" style="color: #2c3e50; margin-right: 10px; font-weight: bold;">Chọn ngày:</label>
         <input type="date" 
                id="selected_date" 
@@ -26,7 +47,7 @@
 
 <!-- Chấm công form -->
 <div style="background: rgba(243, 156, 18, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px;">
-    <h3 style="color: #f39c12; margin-bottom: 15px;">📝 Bảng chấm công</h3>
+    <h3 style="color: #5dade2; margin-bottom: 15px;">📝 Bảng chấm công</h3>
     
     <!-- Thông báo tự động điền -->
     {% if previous_assignments %}
@@ -240,7 +261,7 @@
 
 <!-- Hướng dẫn - Đã ẩn -->
 <div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
-    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Hướng dẫn:</h4>
+    <h4 style="color: #5dade2; margin-bottom: 10px;">💡 Hướng dẫn:</h4>
     <ul style="color: #2c3e50; line-height: 1.6;">
         <li><strong>Chọn ngày:</strong> Chọn ngày cần xem/chấm công</li>
         <li><strong>Số km:</strong> Quãng đường thực tế đã chạy trong chuyến</li>
@@ -259,8 +280,501 @@
     <p style="color: #2c3e50;">Cần tạo tuyến đường trước khi ghi nhận chuyến. <a href="/routes" style="color: #3498db;">Tạo tuyến ngay</a></p>
 </div>
 {% endif %}
+</div>
+
+<!-- Phần chấm công theo tuyến -->
+<div id="content-by-route" class="tab-content" style="display: none;">
+    <!-- Bộ lọc tháng và tuyến -->
+    <div style="margin-bottom: 30px; padding: 15px; background: rgba(52, 152, 219, 0.1); border-radius: 8px;">
+        <form method="get" action="/daily-new" id="route-filter-form" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+            <input type="hidden" name="mode" value="by-route">
+            <div>
+                <label for="selected_month" style="color: #2c3e50; margin-right: 10px; font-weight: bold;">Chọn tháng chấm công:</label>
+                <input type="month" 
+                       id="selected_month" 
+                       name="selected_month" 
+                       value="{{ selected_month or current_month }}" 
+                       style="padding: 8px; border: 2px solid #3498db; border-radius: 5px; font-size: 14px;"
+                       onchange="updateRouteTable()">
+            </div>
+            <div>
+                <label for="selected_route_id" style="color: #2c3e50; margin-right: 10px; font-weight: bold;">Chọn tuyến chấm công:</label>
+                <select id="selected_route_id" 
+                        name="selected_route_id"
+                        style="padding: 8px; border: 2px solid #3498db; border-radius: 5px; font-size: 14px; min-width: 200px;"
+                        onchange="updateRouteTable()">
+                    <option value="">-- Chọn tuyến --</option>
+                    {% for route in all_routes %}
+                    <option value="{{ route.id }}" {% if selected_route_id and selected_route_id|string == route.id|string %}selected{% endif %}>
+                        {{ route.route_code }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="button" 
+                    onclick="updateRouteTable()" 
+                    style="padding: 8px 15px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                🔍 Xem
+            </button>
+        </form>
+        <div style="margin-top: 10px; color: #7f8c8d; font-size: 12px;">
+            <span>Hiển thị chấm công tháng: <strong>{{ selected_month_display or current_month_display }}</strong></span>
+            {% if selected_route_id %}
+            <span style="margin-left: 20px;">Tuyến: <strong id="selected-route-name">{{ selected_route_name or '' }}</strong></span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Bảng chấm công theo tuyến -->
+    <div id="route-attendance-section" style="background: rgba(243, 156, 18, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px; display: none;">
+        <h3 style="color: #5dade2; margin-bottom: 15px;">📝 Bảng chấm công theo tuyến</h3>
+        
+        {% if all_routes %}
+        <form method="post" action="/daily-new/add-by-route" id="routeForm">
+            <input type="hidden" name="selected_month" id="form_selected_month" value="{{ selected_month or current_month }}">
+            <input type="hidden" name="selected_route_id" id="form_selected_route_id" value="{{ selected_route_id or '' }}">
+            
+            <div class="table-container" style="max-height: 600px; overflow-y: auto;">
+                <table class="table" style="background: white; margin-bottom: 0;">
+                    <thead style="position: sticky; top: 0; background: #3498db; color: white; z-index: 10;">
+                        <tr>
+                            <th>STT</th>
+                            <th>Mã tuyến</th>
+                            <th>Ngày chấm công</th>
+                            <th>Km thực tế</th>
+                            <th>Tên lái xe</th>
+                            <th>Biển số xe</th>
+                            <th>Trạng thái</th>
+                            <th>Ghi chú</th>
+                        </tr>
+                    </thead>
+                    <tbody id="route-attendance-tbody">
+                        <!-- Sẽ được điền bằng JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px;">
+                <button type="submit" class="btn btn-success" style="padding: 10px 30px; font-size: 16px;">
+                    💾 Lưu bảng chấm công
+                </button>
+            </div>
+        </form>
+        {% else %}
+        <div style="text-align: center; padding: 40px; background: rgba(231, 76, 60, 0.1); border-radius: 10px; border-left: 4px solid #e74c3c;">
+            <h4 style="color: #e74c3c; margin-bottom: 10px;">⚠️ Chưa có tuyến nào:</h4>
+            <p style="color: #2c3e50;">Cần tạo tuyến đường trước khi ghi nhận chuyến. <a href="/routes" style="color: #3498db;">Tạo tuyến ngay</a></p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Thông báo chưa chọn tuyến -->
+    <div id="route-select-message" style="text-align: center; padding: 40px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f; display: none;">
+        <h4 style="color: #5dade2; margin-bottom: 10px;">💡 Vui lòng chọn tuyến chấm công</h4>
+        <p style="color: #2c3e50;">Chọn tháng và tuyến chấm công ở trên để hiển thị bảng chấm công.</p>
+    </div>
+
+    <!-- Chuyến đã ghi nhận theo tuyến -->
+    <div id="monthly-routes-section" style="display: {% if selected_route_id %}block{% else %}none{% endif %};">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3 style="margin: 0;">📋 Chuyến đã ghi nhận theo tuyến</h3>
+        </div>
+
+        {% if monthly_daily_routes %}
+        <div style="background: rgba(39, 174, 96, 0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+            <p style="margin: 0; color: #27ae60; font-weight: bold;">
+                ✅ Đã ghi nhận {{ monthly_daily_routes|length }} chuyến trong tháng {{ selected_month_display or current_month_display }}
+                {% if selected_route_id %}
+                - Tuyến: <strong>{{ selected_route_name or '' }}</strong>
+                {% endif %}
+            </p>
+        </div>
+
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Mã tuyến</th>
+                    <th>Ngày chạy</th>
+                    <th>Số km</th>
+                    <th>Lái xe</th>
+                    <th>Biển số xe</th>
+                    <th>Trạng thái</th>
+                    <th>Ghi chú</th>
+                    <th>Thao tác</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for daily_route in monthly_daily_routes %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td><strong>{{ daily_route.route.route_code }}</strong></td>
+                    <td>{{ daily_route.date.strftime('%d/%m/%Y') }}</td>
+                    <td>{{ daily_route.distance_km }} km</td>
+                    <td>{{ daily_route.driver_name }}</td>
+                    <td>{{ daily_route.license_plate }}</td>
+                    <td>
+                        <span style="padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; 
+                                     {% if daily_route.status == 'Online' %}background: #27ae60; color: white;{% else %}background: #e74c3c; color: white;{% endif %}">
+                            {{ daily_route.status or 'Online' }}
+                        </span>
+                    </td>
+                    <td>{{ daily_route.notes or 'Không có' }}</td>
+                    <td>
+                        <div style="display: flex; gap: 5px; align-items: center;">
+                            <a href="/daily-new/edit/{{ daily_route.id }}" 
+                               class="btn btn-sm" 
+                               style="background: #3498db; color: white; padding: 3px 8px; font-size: 11px; text-decoration: none; border-radius: 3px; transition: all 0.2s;"
+                               onmouseover="this.style.background='#2980b9'; this.style.transform='scale(1.05)'"
+                               onmouseout="this.style.background='#3498db'; this.style.transform='scale(1)'"
+                               title="Sửa chuyến">
+                                ✏️ Sửa
+                            </a>
+                            <button onclick="deleteRoute({{ daily_route.id }})" 
+                                    class="btn btn-sm btn-danger" 
+                                    style="padding: 3px 8px; font-size: 11px; border: none; border-radius: 3px; transition: all 0.2s;"
+                                    onmouseover="this.style.transform='scale(1.05)'"
+                                    onmouseout="this.style.transform='scale(1)'"
+                                    title="Xóa chuyến">
+                                🗑️ Xóa
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+        {% else %}
+        <div style="text-align: center; padding: 40px; color: #7f8c8d;">
+            <h3>📅 Chưa có chuyến nào trong tháng {{ selected_month_display or current_month_display }}</h3>
+            <p>Hãy ghi nhận chuyến đầu tiên bằng form bên trên</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
 
 <script>
+// Chuyển đổi tab
+function switchTab(mode) {
+    // Ẩn tất cả nội dung
+    document.getElementById('content-by-date').style.display = 'none';
+    document.getElementById('content-by-route').style.display = 'none';
+    
+    // Reset style của tất cả tab buttons
+    document.getElementById('tab-by-date').style.background = '#95a5a6';
+    document.getElementById('tab-by-route').style.background = '#95a5a6';
+    
+    // Hiển thị nội dung tương ứng
+    if (mode === 'by-date') {
+        document.getElementById('content-by-date').style.display = 'block';
+        document.getElementById('tab-by-date').style.background = '#3498db';
+        // Cập nhật URL
+        const url = new URL(window.location);
+        url.searchParams.set('mode', 'by-date');
+        window.history.pushState({}, '', url);
+    } else if (mode === 'by-route') {
+        document.getElementById('content-by-route').style.display = 'block';
+        document.getElementById('tab-by-route').style.background = '#3498db';
+        // Cập nhật URL
+        const url = new URL(window.location);
+        url.searchParams.set('mode', 'by-route');
+        window.history.pushState({}, '', url);
+        // Kiểm tra và hiển thị bảng nếu đã chọn tuyến
+        updateRouteTable();
+    }
+}
+
+// Cập nhật bảng chấm công theo tuyến
+function updateRouteTable() {
+    const routeSelect = document.getElementById('selected_route_id');
+    const monthInput = document.getElementById('selected_month');
+    const attendanceSection = document.getElementById('route-attendance-section');
+    const selectMessage = document.getElementById('route-select-message');
+    const monthlyRoutesSection = document.getElementById('monthly-routes-section');
+    
+    if (!routeSelect || !monthInput) return;
+    
+    const selectedRouteId = routeSelect.value;
+    const selectedMonth = monthInput.value;
+    
+    // Cập nhật form hidden fields
+    const formMonth = document.getElementById('form_selected_month');
+    const formRouteId = document.getElementById('form_selected_route_id');
+    if (formMonth) formMonth.value = selectedMonth;
+    if (formRouteId) formRouteId.value = selectedRouteId;
+    
+    // Chỉ hiển thị bảng khi đã chọn tuyến
+    if (selectedRouteId && selectedMonth) {
+        attendanceSection.style.display = 'block';
+        selectMessage.style.display = 'none';
+        monthlyRoutesSection.style.display = 'block';
+        initRouteAttendanceTable(selectedRouteId, selectedMonth);
+    } else {
+        attendanceSection.style.display = 'none';
+        selectMessage.style.display = 'block';
+        monthlyRoutesSection.style.display = 'none';
+    }
+}
+
+// Khởi tạo bảng chấm công theo tuyến
+function initRouteAttendanceTable(selectedRouteId, selectedMonth) {
+    const tbody = document.getElementById('route-attendance-tbody');
+    if (!tbody) return;
+    
+    if (!selectedRouteId || !selectedMonth) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #7f8c8d;">Vui lòng chọn tuyến và tháng</td></tr>';
+        return;
+    }
+    
+    const [year, month] = selectedMonth.split('-');
+    
+    // Lấy số ngày trong tháng
+    const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+    
+    // Lấy danh sách tuyến và nhân viên, xe từ backend (JSON)
+    let routes = [];
+    let employees = [];
+    let vehicles = [];
+    let existingData = [];
+    
+    try {
+        // Parse JSON data từ backend - filter tojson đã xử lý escape
+        routes = {{ routes_json|tojson }} || [];
+        employees = {{ employees_json|tojson }} || [];
+        vehicles = {{ vehicles_json|tojson }} || [];
+        existingData = {{ monthly_daily_routes_json|tojson }} || [];
+        
+        // Đảm bảo là array
+        if (!Array.isArray(routes)) routes = [];
+        if (!Array.isArray(employees)) employees = [];
+        if (!Array.isArray(vehicles)) vehicles = [];
+        if (!Array.isArray(existingData)) existingData = [];
+        
+        // Debug log để kiểm tra
+        console.log('Loaded data:', {
+            routesCount: routes.length,
+            employeesCount: employees.length,
+            vehiclesCount: vehicles.length,
+            existingDataCount: existingData.length
+        });
+    } catch (e) {
+        console.error('Error loading JSON data:', e);
+        console.error('Error message:', e.message);
+        // Đảm bảo ít nhất là empty arrays
+        routes = [];
+        employees = [];
+        vehicles = [];
+        existingData = [];
+    }
+    
+    // Tìm tuyến được chọn
+    const selectedRoute = routes.find(r => r.id == selectedRouteId);
+    if (!selectedRoute) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e74c3c;">Không tìm thấy tuyến được chọn</td></tr>';
+        return;
+    }
+    
+    // Tạo map để tra cứu dữ liệu đã chấm công (chỉ cho tuyến đã chọn)
+    const existingDataMap = {};
+    existingData.forEach(item => {
+        if (item.route_id == selectedRouteId) {
+            existingDataMap[item.date] = item;
+        }
+    });
+    
+    tbody.innerHTML = '';
+    let rowIndex = 0;
+    
+    // Chỉ tạo dòng cho các ngày CHƯA được chấm công trong tháng
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dayStr = day.toString().padStart(2, '0');
+        const monthStr = month.padStart(2, '0');
+        const currentDate = `${year}-${monthStr}-${dayStr}`;
+        
+        // Bỏ qua nếu ngày này đã được chấm công
+        if (existingDataMap[currentDate]) {
+            continue;
+        }
+        
+        const dateObj = new Date(parseInt(year), parseInt(month) - 1, day);
+        const dayOfWeek = dateObj.getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        
+        rowIndex++;
+        
+        const row = document.createElement('tr');
+        if (isWeekend) {
+            row.style.backgroundColor = 'rgba(241, 196, 15, 0.1)';
+        }
+        
+        const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+        
+        row.innerHTML = `
+            <td>${rowIndex}</td>
+            <td>
+                <strong>${selectedRoute.route_code || ''}</strong>
+                <input type="hidden" name="route_id_${rowIndex}" value="${selectedRouteId}">
+            </td>
+            <td>
+                <input type="date" 
+                       name="date_${rowIndex}" 
+                       value="${currentDate}" 
+                       readonly
+                       style="padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 4px; background: #f5f5f5;">
+                <div style="font-size: 11px; color: #7f8c8d; margin-top: 2px;">
+                    ${dayNames[dayOfWeek]}
+                </div>
+            </td>
+            <td>
+                <input type="number" 
+                       name="distance_km_${rowIndex}" 
+                       step="0.1" 
+                       value=""
+                       placeholder="0.0"
+                       style="padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 4px;">
+            </td>
+            <td>
+                <select name="driver_name_${rowIndex}" 
+                        id="driver_name_${rowIndex}"
+                        class="driver-select"
+                        data-row-index="${rowIndex}"
+                        style="padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="">Chọn lái xe</option>
+                    ${employees.map(emp => `<option value="${(emp.name || '').replace(/"/g, '&quot;')}">${emp.name || ''}</option>`).join('')}
+                </select>
+            </td>
+            <td>
+                <select name="license_plate_${rowIndex}" 
+                        id="license_plate_${rowIndex}"
+                        class="license-select"
+                        data-row-index="${rowIndex}"
+                        style="padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="">Chọn xe</option>
+                    ${vehicles.map(veh => `<option value="${(veh.license_plate || '').replace(/"/g, '&quot;')}">${veh.license_plate || ''}</option>`).join('')}
+                </select>
+            </td>
+            <td>
+                <select name="status_${rowIndex}" style="padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="Đã chạy">Đã chạy</option>
+                    <option value="Nghỉ">Nghỉ</option>
+                    <option value="Bảo trì">Bảo trì</option>
+                    <option value="Không chạy">Không chạy</option>
+                    <option value="Online" selected>Online</option>
+                    <option value="OFF">OFF</option>
+                </select>
+            </td>
+            <td>
+                <input type="text" 
+                       name="notes_${rowIndex}" 
+                       value=""
+                       placeholder="Ghi chú"
+                       style="padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 4px;">
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+    }
+    
+    // Nếu không có ngày nào cần chấm công
+    if (rowIndex === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #27ae60; font-weight: bold;">✅ Tất cả các ngày trong tháng đã được chấm công cho tuyến này!</td></tr>';
+        return;
+    }
+    
+    // Thêm event listener cho dòng đầu tiên để tự động điền các dòng tiếp theo
+    setupAutoFillFromFirstRow();
+}
+
+// Thiết lập tự động điền từ dòng đầu tiên
+function setupAutoFillFromFirstRow() {
+    const firstDriverSelect = document.getElementById('driver_name_1');
+    const firstLicenseSelect = document.getElementById('license_plate_1');
+    
+    if (!firstDriverSelect || !firstLicenseSelect) return;
+    
+    // Lắng nghe sự kiện thay đổi của dòng đầu tiên
+    firstDriverSelect.addEventListener('change', function() {
+        const selectedDriver = this.value;
+        if (selectedDriver) {
+            // Tự động điền vào tất cả các dòng tiếp theo (nếu chưa có giá trị)
+            const allDriverSelects = document.querySelectorAll('.driver-select');
+            allDriverSelects.forEach(select => {
+                const rowIndex = parseInt(select.getAttribute('data-row-index'));
+                if (rowIndex > 1 && !select.value) {
+                    // Chỉ điền nếu dòng đó chưa có giá trị
+                    select.value = selectedDriver;
+                }
+            });
+        }
+    });
+    
+    firstLicenseSelect.addEventListener('change', function() {
+        const selectedLicense = this.value;
+        if (selectedLicense) {
+            // Tự động điền vào tất cả các dòng tiếp theo (nếu chưa có giá trị)
+            const allLicenseSelects = document.querySelectorAll('.license-select');
+            allLicenseSelects.forEach(select => {
+                const rowIndex = parseInt(select.getAttribute('data-row-index'));
+                if (rowIndex > 1 && !select.value) {
+                    // Chỉ điền nếu dòng đó chưa có giá trị
+                    select.value = selectedLicense;
+                }
+            });
+        }
+    });
+    
+    // Tự động điền khi cả hai đều đã được chọn ở dòng đầu tiên
+    function checkAndAutoFill() {
+        const firstDriver = firstDriverSelect.value;
+        const firstLicense = firstLicenseSelect.value;
+        
+        if (firstDriver && firstLicense) {
+            // Tự động điền vào tất cả các dòng tiếp theo (nếu chưa có giá trị)
+            const allDriverSelects = document.querySelectorAll('.driver-select');
+            const allLicenseSelects = document.querySelectorAll('.license-select');
+            
+            allDriverSelects.forEach(select => {
+                const rowIndex = parseInt(select.getAttribute('data-row-index'));
+                if (rowIndex > 1 && !select.value) {
+                    select.value = firstDriver;
+                }
+            });
+            
+            allLicenseSelects.forEach(select => {
+                const rowIndex = parseInt(select.getAttribute('data-row-index'));
+                if (rowIndex > 1 && !select.value) {
+                    select.value = firstLicense;
+                }
+            });
+        }
+    }
+    
+    // Kiểm tra và tự động điền khi cả hai đã được chọn
+    firstDriverSelect.addEventListener('change', checkAndAutoFill);
+    firstLicenseSelect.addEventListener('change', checkAndAutoFill);
+}
+
+// Khởi tạo tab mặc định khi trang load
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode') || 'by-date';
+    switchTab(mode);
+    
+    // Nếu ở chế độ by-route, cập nhật tên tuyến được chọn
+    if (mode === 'by-route') {
+        const routeSelect = document.getElementById('selected_route_id');
+        if (routeSelect && routeSelect.value) {
+            const selectedOption = routeSelect.options[routeSelect.selectedIndex];
+            const routeNameElement = document.getElementById('selected-route-name');
+            if (routeNameElement) {
+                routeNameElement.textContent = selectedOption.text;
+            }
+        }
+    }
+});
+
 function deleteRoute(routeId) {
     if (confirm('Bạn có chắc chắn muốn xóa chuyến này?')) {
         // Tạo form để submit POST request

@@ -3,6 +3,7 @@
 {% block title %}Quản lý nhân viên - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
+<div class="page-wrapper">
 <div class="page-header">
     <h2>👥 Quản lý nhân viên</h2>
     <p>Quản lý thông tin nhân viên và lái xe trong hệ thống</p>
@@ -23,12 +24,10 @@
             <thead>
                 <tr>
                     <th>STT</th>
-                    <th>Họ và tên</th>
-                    <th>Số điện thoại</th>
-                    <th>Hạng bằng lái</th>
-                    <th>CCCD</th>
-                    <th>Ngày sinh</th>
-                    <th style="display: none;">Hết hạn bằng lái</th>
+                    <th>Họ tên</th>
+                    <th>SĐT</th>
+                    <th>Chức vụ</th>
+                    <th>Trạng thái</th>
                     <th>Giấy tờ</th>
                     <th>Thao tác</th>
                 </tr>
@@ -39,10 +38,26 @@
                     <td>{{ loop.index }}</td>
                     <td><strong>{{ employee.name }}</strong></td>
                     <td>{{ employee.phone or 'Chưa cập nhật' }}</td>
-                    <td>{{ employee.driving_license or 'Chưa cập nhật' }}</td>
-                    <td>{{ employee.cccd or 'Chưa cập nhật' }}</td>
-                    <td>{{ employee.birth_date.strftime('%d/%m/%Y') if employee.birth_date else 'Chưa cập nhật' }}</td>
-                    <td style="display: none;">{{ employee.license_expiry.strftime('%d/%m/%Y') if employee.license_expiry else 'Chưa cập nhật' }}</td>
+                    <td>{{ employee.position or 'Chưa cập nhật' }}</td>
+                    <td>
+                        {% if employee.employee_status == 'Đang làm việc' %}
+                            <span style="padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; background: #27ae60; color: white;">
+                                {{ employee.employee_status or 'Đang làm việc' }}
+                            </span>
+                        {% elif employee.employee_status == 'Nghỉ phép dài hạn' %}
+                            <span style="padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; background: #5dade2; color: white;">
+                                {{ employee.employee_status }}
+                            </span>
+                        {% elif employee.employee_status == 'Đã nghỉ việc' %}
+                            <span style="padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; background: #e74c3c; color: white;">
+                                {{ employee.employee_status }}
+                            </span>
+                        {% else %}
+                            <span style="padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; background: #27ae60; color: white;">
+                                Đang làm việc
+                            </span>
+                        {% endif %}
+                    </td>
                     <td>
                         {% set documents_list = employee.documents | from_json %}
                         {% if documents_list and documents_list|length > 0 %}
@@ -75,6 +90,7 @@
         <p>Hãy thêm nhân viên đầu tiên bằng nút "Thêm mới +" bên trên</p>
     </div>
     {% endif %}
+</div>
 </div>
 
 <!-- Modal Thêm nhân viên mới -->
@@ -111,6 +127,27 @@
                 
                 <div class="form-row">
                     <div class="form-group">
+                        <label for="employee_status">Trạng thái nhân viên *</label>
+                        <select id="employee_status" name="employee_status" required>
+                            <option value="Đang làm việc" selected>Đang làm việc</option>
+                            <option value="Đã nghỉ việc">Đã nghỉ việc</option>
+                            <option value="Nghỉ phép dài hạn">Nghỉ phép dài hạn</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="position">Chức vụ *</label>
+                        <select id="position" name="position" required>
+                            <option value="">-- Chọn chức vụ --</option>
+                            <option value="Giám đốc">Giám đốc</option>
+                            <option value="Phó Giám đốc">Phó Giám đốc</option>
+                            <option value="Lái xe">Lái xe</option>
+                            <option value="Nhân viên văn phòng">Nhân viên văn phòng</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row" style="display: none;">
+                    <div class="form-group">
                         <label for="cccd_issue_date">Ngày cấp CCCD</label>
                         <input type="date" id="cccd_issue_date" name="cccd_issue_date">
                     </div>
@@ -118,9 +155,6 @@
                         <label for="driving_license">Hạng bằng lái</label>
                         <input type="text" id="driving_license" name="driving_license" placeholder="Nhập hạng bằng lái (VD: B2, C, D)">
                     </div>
-                </div>
-                
-                <div class="form-row" style="display: none;">
                     <div class="form-group">
                         <label for="license_expiry">Ngày hết hạn bằng lái</label>
                         <input type="date" id="license_expiry" name="license_expiry">
@@ -336,7 +370,8 @@
     margin-bottom: 8px;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
     padding: 10px 12px;
     border: 2px solid #e9ecef;
     border-radius: 6px;
@@ -344,10 +379,26 @@
     transition: border-color 0.3s;
 }
 
-.form-group input:focus {
+.form-group select {
+    background: white;
+    cursor: pointer;
+}
+
+.form-group input:focus,
+.form-group select:focus {
     border-color: #667eea;
     outline: none;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group select {
+    padding: 10px 12px;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border-color 0.3s;
+    background: white;
+    cursor: pointer;
 }
 
 .form-help {

@@ -3,13 +3,14 @@
 {% block title %}Sửa chuyến - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
+<div class="page-wrapper">
 <div style="margin-bottom: 20px;">
-    <a href="/daily-new?selected_date={{ daily_route.date.strftime('%Y-%m-%d') }}" class="btn" style="background: #95a5a6; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+    <a href="/daily-new?selected_date={{ daily_route.date.strftime('%Y-%m-%d') }}" class="btn btn-secondary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
         ← Quay lại
     </a>
 </div>
 
-<h2>✏️ Sửa chuyến</h2>
+<h2 class="page-title">✏️ Sửa chuyến</h2>
 
 <!-- Thông tin chuyến hiện tại -->
 <div style="background: rgba(52, 152, 219, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 30px; border-left: 4px solid #3498db;">
@@ -150,7 +151,7 @@
 
 <!-- Thông tin hướng dẫn - Đã ẩn -->
 <div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
-    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Hướng dẫn chỉnh sửa:</h4>
+    <h4 style="color: #5dade2; margin-bottom: 10px;">💡 Hướng dẫn chỉnh sửa:</h4>
     <ul style="color: #2c3e50; line-height: 1.6;">
         <li><strong>Số km thực tế:</strong> Cập nhật quãng đường thực tế đã chạy (bắt buộc)</li>
         <li><strong>Tên lái xe:</strong> Thay đổi người lái xe nếu cần thiết</li>
@@ -177,4 +178,5 @@ input:focus, select:focus, textarea:focus {
     box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
 }
 </style>
+</div>
 {% endblock %}

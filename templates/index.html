@@ -3,6 +3,7 @@
 {% block title %}Trang chủ - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
+<div class="page-wrapper">
 <div class="stats-grid">
     <div class="stat-card">
         <h3>{{ employees_count or 0 }}</h3>
@@ -22,37 +23,38 @@
     </div>
 </div>
 
-<h2>Chức năng chính</h2>
+<h2 class="section-title">Chức năng chính</h2>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-top: 20px;">
-    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
-        <h3 style="margin-bottom: 10px;">Quản lý nhân viên</h3>
-        <p style="margin-bottom: 10px;">Thêm, sửa, xóa thông tin nhân viên và lương cơ bản</p>
-        <a href="/employees" class="btn">Quản lý nhân viên</a>
+    <div class="card" style="padding: 20px;">
+        <h3 style="margin-bottom: 10px; color: #1976d2;">Quản lý nhân viên</h3>
+        <p style="margin-bottom: 10px; color: #424242;">Thêm, sửa, xóa thông tin nhân viên và lương cơ bản</p>
+        <a href="/employees" class="btn btn-primary">Quản lý nhân viên</a>
     </div>
     
-    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
-        <h3 style="margin-bottom: 10px;">Quản lý xe</h3>
-        <p style="margin-bottom: 10px;">Quản lý thông tin xe, biển số, trọng tải và tiêu hao nhiên liệu</p>
-        <a href="/vehicles" class="btn">Quản lý xe</a>
+    <div class="card" style="padding: 20px;">
+        <h3 style="margin-bottom: 10px; color: #1976d2;">Quản lý xe</h3>
+        <p style="margin-bottom: 10px; color: #424242;">Quản lý thông tin xe, biển số, trọng tải và tiêu hao nhiên liệu</p>
+        <a href="/vehicles" class="btn btn-primary">Quản lý xe</a>
     </div>
     
-    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
-        <h3 style="margin-bottom: 10px;">Quản lý tuyến</h3>
-        <p style="margin-bottom: 10px;">Thiết lập tuyến đường, khoảng cách, đơn giá và phân công nhân viên</p>
-        <a href="/routes" class="btn">Quản lý tuyến</a>
+    <div class="card" style="padding: 20px;">
+        <h3 style="margin-bottom: 10px; color: #1976d2;">Quản lý tuyến</h3>
+        <p style="margin-bottom: 10px; color: #424242;">Thiết lập tuyến đường, khoảng cách, đơn giá và phân công nhân viên</p>
+        <a href="/routes" class="btn btn-primary">Quản lý tuyến</a>
     </div>
     
-    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
-        <h3 style="margin-bottom: 10px;">Bảng chấm công</h3>
-        <p style="margin-bottom: 10px;">Ghi nhận chuyến hàng hàng ngày, chi phí xăng dầu và lương chuyến</p>
-        <a href="/daily-new" class="btn">Ghi nhận chuyến</a>
+    <div class="card" style="padding: 20px;">
+        <h3 style="margin-bottom: 10px; color: #1976d2;">Bảng chấm công</h3>
+        <p style="margin-bottom: 10px; color: #424242;">Ghi nhận chuyến hàng hàng ngày, chi phí xăng dầu và lương chuyến</p>
+        <a href="/daily-new" class="btn btn-primary">Ghi nhận chuyến</a>
     </div>
     
-    <div style="background: white; padding: 15px; border: 1px solid #ddd;">
-        <h3 style="margin-bottom: 10px;">Thống kê tổng hợp</h3>
-        <p style="margin-bottom: 10px;">Xem thống kê hoạt động vận chuyển, báo cáo chi tiết theo lái xe và xuất dữ liệu</p>
-        <a href="/salary-simple" class="btn">Thống kê tổng hợp</a>
+    <div class="card" style="padding: 20px;">
+        <h3 style="margin-bottom: 10px; color: #1976d2;">Thống kê tổng hợp</h3>
+        <p style="margin-bottom: 10px; color: #424242;">Xem thống kê hoạt động vận chuyển, báo cáo chi tiết theo lái xe và xuất dữ liệu</p>
+        <a href="/salary-simple" class="btn btn-primary">Thống kê tổng hợp</a>
     </div>
+</div>
 </div>
 
 <!-- Hướng dẫn sử dụng - Đã ẩn -->

@@ -3,6 +3,7 @@
 {% block title %}Sửa nhân viên - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
+<div class="page-wrapper">
 <div class="page-header">
     <h2><i class="fas fa-user-edit"></i> Sửa thông tin nhân viên</h2>
     <p>Cập nhật thông tin cho nhân viên: <strong>{{ employee.name }}</strong></p>
@@ -42,6 +43,26 @@
             </div>
             
             <div class="form-group">
+                <label for="employee_status">Trạng thái nhân viên *</label>
+                <select id="employee_status" name="employee_status" required>
+                    <option value="Đang làm việc" {% if employee.employee_status == 'Đang làm việc' or not employee.employee_status %}selected{% endif %}>Đang làm việc</option>
+                    <option value="Đã nghỉ việc" {% if employee.employee_status == 'Đã nghỉ việc' %}selected{% endif %}>Đã nghỉ việc</option>
+                    <option value="Nghỉ phép dài hạn" {% if employee.employee_status == 'Nghỉ phép dài hạn' %}selected{% endif %}>Nghỉ phép dài hạn</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="position">Chức vụ *</label>
+                <select id="position" name="position" required>
+                    <option value="">-- Chọn chức vụ --</option>
+                    <option value="Giám đốc" {% if employee.position == 'Giám đốc' %}selected{% endif %}>Giám đốc</option>
+                    <option value="Phó Giám đốc" {% if employee.position == 'Phó Giám đốc' %}selected{% endif %}>Phó Giám đốc</option>
+                    <option value="Lái xe" {% if employee.position == 'Lái xe' %}selected{% endif %}>Lái xe</option>
+                    <option value="Nhân viên văn phòng" {% if employee.position == 'Nhân viên văn phòng' %}selected{% endif %}>Nhân viên văn phòng</option>
+                </select>
+            </div>
+            
+            <div class="form-group" style="display: none;">
                 <label for="driving_license">Hạng bằng lái</label>
                 <input type="text" id="driving_license" name="driving_license" placeholder="Nhập hạng bằng lái (VD: B2, C, D)" value="{{ employee.driving_license or '' }}">
             </div>
@@ -172,7 +193,8 @@
     margin-bottom: 8px;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
     padding: 10px 12px;
     border: 2px solid #e9ecef;
     border-radius: 6px;
@@ -180,7 +202,13 @@
     transition: border-color 0.3s;
 }
 
-.form-group input:focus {
+.form-group select {
+    background: white;
+    cursor: pointer;
+}
+
+.form-group input:focus,
+.form-group select:focus {
     border-color: #667eea;
     outline: none;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -677,4 +705,5 @@ document.addEventListener('keydown', function(event) {
     }
 });
 </script>
+</div>
 {% endblock %}

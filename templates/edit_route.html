@@ -3,9 +3,10 @@
 {% block title %}Sửa tuyến đường - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
-<h2>Sửa tuyến đường</h2>
+<div class="page-wrapper">
+<h2 class="page-title">Sửa tuyến đường</h2>
 
-<div style="background: white; padding: 20px; border: 1px solid #ddd; margin-bottom: 20px;">
+<div class="card" style="padding: 20px; margin-bottom: 20px;">
     <h3 style="margin-bottom: 15px;">Cập nhật thông tin tuyến</h3>
     <form method="post" action="/routes/edit/{{ route.id }}" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
         <div class="form-group">
@@ -15,6 +16,33 @@
         <div class="form-group">
             <label for="route_name">Lộ trình *</label>
             <input type="text" id="route_name" name="route_name" required placeholder="VD: Kho Trung Chuyển -> Bưu Cục" value="{{ route.route_name }}">
+        </div>
+        <div class="form-group">
+            <label for="route_type">Loại tuyến *</label>
+            <select id="route_type" name="route_type" required onchange="updateUnitPrice()">
+                <option value="">-- Chọn loại tuyến --</option>
+                <option value="Nội thành" {% if route.route_type == 'Nội thành' %}selected{% endif %}>Nội thành</option>
+                <option value="Nội Tỉnh" {% if route.route_type == 'Nội Tỉnh' or not route.route_type %}selected{% endif %}>Nội Tỉnh</option>
+                <option value="Liên Tỉnh" {% if route.route_type == 'Liên Tỉnh' %}selected{% endif %}>Liên Tỉnh</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="unit_price">Đơn giá (VNĐ) *</label>
+            <input type="number" id="unit_price" name="unit_price" min="0" step="0.01" required placeholder="VD: 227273" 
+                   value="{{ route.unit_price or '' }}" oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help" id="unit_price_help">Nhập đơn giá (ví dụ: 227,273 hoặc 227273)</small>
+        </div>
+        <div class="form-group" id="bridge_fee_group" style="display: none;">
+            <label for="bridge_fee">Phí cầu đường (VNĐ)</label>
+            <input type="number" id="bridge_fee" name="bridge_fee" min="0" step="0.01" placeholder="VD: 50000" 
+                   value="{{ route.bridge_fee or '' }}" oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help">Nhập phí cầu đường (không bắt buộc)</small>
+        </div>
+        <div class="form-group" id="loading_fee_group" style="display: none;">
+            <label for="loading_fee">Phí chờ tải (VNĐ)</label>
+            <input type="number" id="loading_fee" name="loading_fee" min="0" step="0.01" placeholder="VD: 30000" 
+                   value="{{ route.loading_fee or '' }}" oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
+            <small class="form-help">Nhập phí chờ tải (không bắt buộc)</small>
         </div>
         <div class="form-group">
             <label for="distance">Khoảng cách (km)</label>
@@ -31,5 +59,45 @@
             <a href="/routes" class="btn btn-secondary">Hủy</a>
         </div>
     </form>
+    
+    <script>
+    function updateUnitPrice() {
+        const routeType = document.getElementById('route_type').value;
+        const unitPriceInput = document.getElementById('unit_price');
+        const unitPriceHelp = document.getElementById('unit_price_help');
+        const bridgeFeeGroup = document.getElementById('bridge_fee_group');
+        const loadingFeeGroup = document.getElementById('loading_fee_group');
+        
+        if (routeType === 'Nội thành') {
+            // Nếu chưa có giá hoặc giá = 0, set giá mặc định
+            if (!unitPriceInput.value || unitPriceInput.value == '0') {
+                unitPriceInput.value = '227273';
+            }
+            unitPriceHelp.textContent = 'Giá mặc định: 227,273 đ/chuyến (có thể chỉnh sửa)';
+            unitPriceInput.readOnly = false;
+            // Ẩn các trường phí cho Nội thành
+            bridgeFeeGroup.style.display = 'none';
+            loadingFeeGroup.style.display = 'none';
+        } else if (routeType === 'Nội Tỉnh' || routeType === 'Liên Tỉnh') {
+            unitPriceHelp.textContent = 'Nhập đơn giá bắt buộc (ví dụ: 227,273 hoặc 227273)';
+            unitPriceInput.readOnly = false;
+            unitPriceInput.required = true;
+            // Hiển thị các trường phí cho Nội Tỉnh/Liên Tỉnh
+            bridgeFeeGroup.style.display = 'block';
+            loadingFeeGroup.style.display = 'block';
+        } else {
+            unitPriceHelp.textContent = 'Nhập đơn giá (ví dụ: 227,273 hoặc 227273)';
+            // Ẩn các trường phí khi chưa chọn loại tuyến
+            bridgeFeeGroup.style.display = 'none';
+            loadingFeeGroup.style.display = 'none';
+        }
+    }
+    
+    // Gọi hàm khi trang load để cập nhật help text và hiển thị trường phí
+    window.onload = function() {
+        updateUnitPrice();
+    };
+    </script>
+</div>
 </div>
 {% endblock %}

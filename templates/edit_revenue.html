@@ -19,16 +19,21 @@
             
             <div class="form-group">
                 <label for="distance_km">Khoảng cách (km) *</label>
+                <div style="margin-bottom: 5px;">
+                    <small style="color: #7f8c8d;">
+                        Số km mặc định: <strong>{{ "{:,.1f}".format(revenue_record.route.distance) if revenue_record.route.distance else "0" }} km</strong>
+                    </small>
+                </div>
                 <input type="number" 
                        id="distance_km" 
                        name="distance_km" 
                        step="0.1" 
                        min="0"
-                       value="{{ revenue_record.distance_km if revenue_record.distance_km else '' }}"
-                       placeholder="0"
+                       value="{{ revenue_record.distance_km if revenue_record.distance_km else (revenue_record.route.distance if revenue_record.route.distance else '') }}"
+                       placeholder="{{ revenue_record.route.distance if revenue_record.route.distance else '0' }}"
                        required
                        onchange="calculateTotal()">
-                <small class="form-help">Khoảng cách thực tế đã chạy</small>
+                <small class="form-help">Số km thực tế đã chạy (có thể khác số km mặc định)</small>
             </div>
             
             <div class="form-group">
@@ -136,7 +141,7 @@
 
 <!-- Hướng dẫn - Đã ẩn -->
 <div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
-    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Hướng dẫn:</h4>
+    <h4 style="color: #5dade2; margin-bottom: 10px;">💡 Hướng dẫn:</h4>
     <ul style="color: #2c3e50; line-height: 1.6;">
         <li><strong>Khoảng cách:</strong> Nhập khoảng cách thực tế đã chạy (có thể khác với khoảng cách tuyến)</li>
         <li><strong>Đơn giá:</strong> Nhập đơn giá VNĐ/km (số nguyên)</li>
@@ -262,5 +267,5 @@ document.addEventListener('DOMContentLoaded', function() {
     autoFillDefaultAmount('{{ revenue_record.route.route_code }}');
 });
 </script>
-
+</div>
 {% endblock %}

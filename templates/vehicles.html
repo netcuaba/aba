@@ -3,7 +3,8 @@
 {% block title %}Quản lý xe - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
-<h2>🚚 Quản lý xe</h2>
+<div class="page-wrapper">
+<h2 class="page-title">🚚 Quản lý xe</h2>
 
 <!-- Button thêm mới xe -->
 <div style="margin-bottom: 20px;">
@@ -12,7 +13,7 @@
     </button>
 </div>
 
-<h3>📋 Danh sách xe</h3>
+<h3 class="section-title">📋 Danh sách xe</h3>
 {% if vehicles %}
 <div style="overflow-x: auto;">
     <table class="table">
@@ -214,7 +215,7 @@
 
 <!-- Lưu ý - Đã ẩn -->
 <div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
-    <h4 style="color: #f39c12; margin-bottom: 10px;">💡 Lưu ý:</h4>
+    <h4 style="color: #5dade2; margin-bottom: 10px;">💡 Lưu ý:</h4>
     <ul style="color: #2c3e50; line-height: 1.6;">
         <li>Biển số xe phải là duy nhất trong hệ thống</li>
         <li>Loại xe và tải trọng là bắt buộc</li>
@@ -534,4 +535,5 @@ window.onclick = function(event) {
     }
 }
 </script>
+</div>
 {% endblock %}
