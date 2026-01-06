@@ -86,6 +86,16 @@
                     </a>
                     {% endif %}
                     
+                    {# Theo dõi vỏ xe - Admin và User #}
+                    {% if current_user.role in ["Admin", "User"] %}
+                    <a href="/theo-doi-vo-xe" class="nav-card">
+                        <div class="nav-icon-box">
+                            <i class="fas fa-circle-notch"></i>
+                        </div>
+                        <span class="nav-label">Theo dõi vỏ xe</span>
+                    </a>
+                    {% endif %}
+                    
                     {# Theo dõi dầu V2 - Admin và User #}
                     {% if current_user.role in ["Admin", "User"] %}
                     <a href="/theo-doi-dau-v2" class="nav-card">

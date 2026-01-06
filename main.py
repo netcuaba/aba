@@ -126,6 +126,7 @@ class Vehicle(Base):
     # Relationships
     routes = relationship("Route", back_populates="vehicle")
     maintenances = relationship("VehicleMaintenance", back_populates="vehicle")
+    tire_replacements = relationship("VehicleTireReplacement", back_populates="vehicle")
 
 class VehicleMaintenance(Base):
     """Bảng quản lý bảo dưỡng xe"""
@@ -160,6 +161,52 @@ class VehicleMaintenanceItem(Base):
     
     # Relationships
     maintenance = relationship("VehicleMaintenance", back_populates="items")
+
+class VehicleTireReplacement(Base):
+    """Bảng quản lý thay vỏ xe"""
+    __tablename__ = "vehicle_tire_replacements"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
+    replacement_date = Column(Date, nullable=False)  # Ngày thay vỏ
+    replacement_km = Column(Float, nullable=False)  # Số km tại thời điểm thay
+    vat_rate = Column(Float, default=0)  # VAT (%): 0, 5, 8, 10
+    total_amount = Column(Float, default=0)  # Tổng cộng (chưa VAT)
+    total_with_vat = Column(Float, default=0)  # Tổng cộng (bao gồm VAT)
+    notes = Column(String)  # Ghi chú
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    vehicle = relationship("Vehicle", back_populates="tire_replacements")
+    items = relationship("VehicleTireReplacementItem", back_populates="replacement", cascade="all, delete-orphan")
+
+class VehicleTireReplacementItem(Base):
+    """Bảng chi tiết vỏ thay"""
+    __tablename__ = "vehicle_tire_replacement_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    replacement_id = Column(Integer, ForeignKey("vehicle_tire_replacements.id"), nullable=False)
+    tire_type = Column(String, nullable=False)  # Loại vỏ (VD: Michelin X)
+    tire_manufacturer = Column(String)  # Hãng vỏ (VD: Michelin, Bridgestone)
+    tire_brand = Column(String)  # Seri vỏ
+    position = Column(String)  # Vị trí bánh (Trước trái, Trước phải, Sau trái, Sau phải, ...)
+    unit = Column(String, default="cái")  # Đơn vị tính (ĐVT)
+    quantity = Column(Float, default=0)  # Số lượng (SL)
+    unit_price = Column(Float, default=0)  # Đơn giá
+    total_price = Column(Float, default=0)  # Thành tiền = SL × Đơn giá
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    replacement = relationship("VehicleTireReplacement", back_populates="items")
+
+class TireType(Base):
+    """Bảng quản lý loại vỏ và tuổi thọ"""
+    __tablename__ = "tire_types"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tire_type = Column(String, nullable=False, unique=True)  # Loại vỏ (VD: Michelin X)
+    expected_lifespan_km = Column(Float, default=0)  # Tuổi thọ dự kiến (km)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Route(Base):
     __tablename__ = "routes"
@@ -507,6 +554,37 @@ try:
     migrate_maintenance_items()
 except Exception as e:
     print(f"Migration error for vehicle_maintenance_items (may be expected if table doesn't exist yet): {e}")
+
+# Migration: Thêm cột tire_manufacturer vào bảng vehicle_tire_replacement_items nếu chưa có
+def migrate_tire_replacement_items():
+    """Thêm cột tire_manufacturer vào bảng vehicle_tire_replacement_items nếu chưa có"""
+    from sqlalchemy import inspect, text
+    
+    try:
+        inspector = inspect(engine)
+        # Kiểm tra xem bảng có tồn tại không
+        if 'vehicle_tire_replacement_items' not in inspector.get_table_names():
+            print("Table vehicle_tire_replacement_items does not exist yet, will be created by create_all")
+            return
+        
+        existing_columns = [col['name'] for col in inspector.get_columns('vehicle_tire_replacement_items')]
+        
+        if 'tire_manufacturer' not in existing_columns:
+            with engine.connect() as conn:
+                try:
+                    conn.execute(text("ALTER TABLE vehicle_tire_replacement_items ADD COLUMN tire_manufacturer VARCHAR"))
+                    conn.commit()
+                    print("Added column tire_manufacturer to vehicle_tire_replacement_items")
+                except Exception as e:
+                    print(f"Error adding column tire_manufacturer: {e}")
+                    conn.rollback()
+    except Exception as e:
+        print(f"Migration error for vehicle_tire_replacement_items: {e}")
+
+try:
+    migrate_tire_replacement_items()
+except Exception as e:
+    print(f"Migration error for vehicle_tire_replacement_items (may be expected if table doesn't exist yet): {e}")
 
 # Dependency để lấy database session
 def get_db():
@@ -1930,6 +2008,572 @@ async def delete_maintenance(
         return JSONResponse({
             "success": True,
             "message": "Đã xóa bảo dưỡng thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "error": f"Lỗi hệ thống: {str(e)}"
+        }, status_code=500)
+
+# ==================== THEO DÕI VỎ XE ====================
+
+@app.get("/theo-doi-vo-xe", response_class=HTMLResponse)
+async def tire_tracking_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Trang danh sách theo dõi vỏ xe"""
+    # Nếu chưa đăng nhập, redirect về login
+    if current_user is None:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    # Chỉ Admin và User mới được truy cập
+    if current_user["role"] not in ["Admin", "User"]:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    # Lấy danh sách xe có loại = "Xe Nhà"
+    vehicles = db.query(Vehicle).filter(
+        Vehicle.status == 1,
+        Vehicle.vehicle_type == "Xe Nhà"
+    ).all()
+    
+    # Tính thông tin vỏ cho mỗi xe
+    today = date.today()
+    vehicles_with_tire_info = []
+    
+    for vehicle in vehicles:
+        # Lấy lần thay vỏ gần nhất
+        last_replacement = db.query(VehicleTireReplacement).filter(
+            VehicleTireReplacement.vehicle_id == vehicle.id
+        ).order_by(VehicleTireReplacement.replacement_date.desc()).first()
+        
+        # Lấy số km hiện tại từ bảo dưỡng gần nhất
+        last_maintenance = db.query(VehicleMaintenance).filter(
+            VehicleMaintenance.vehicle_id == vehicle.id,
+            VehicleMaintenance.maintenance_date <= today
+        ).order_by(VehicleMaintenance.maintenance_date.desc()).first()
+        
+        current_km = last_maintenance.maintenance_km if last_maintenance else None
+        last_replacement_km = last_replacement.replacement_km if last_replacement else None
+        
+        # Tính số km đã chạy
+        km_run = None
+        if current_km and last_replacement_km:
+            km_run = current_km - last_replacement_km
+        
+        # Lấy loại vỏ đang sử dụng (từ lần thay gần nhất)
+        current_tire_type = None
+        expected_lifespan = None
+        if last_replacement and last_replacement.items:
+            # Lấy loại vỏ từ item đầu tiên (hoặc có thể lấy từ nhiều items)
+            first_item = last_replacement.items[0]
+            current_tire_type = first_item.tire_type
+            
+            # Lấy tuổi thọ dự kiến từ bảng tire_types
+            tire_type_record = db.query(TireType).filter(
+                TireType.tire_type == current_tire_type
+            ).first()
+            if tire_type_record:
+                expected_lifespan = tire_type_record.expected_lifespan_km
+        
+        # Tính trạng thái vỏ
+        tire_status = None
+        if km_run is not None and expected_lifespan and expected_lifespan > 0:
+            percentage = (km_run / expected_lifespan) * 100
+            if percentage < 80:
+                tire_status = "Bình thường"
+            elif percentage < 100:
+                tire_status = "Sắp tới hạn"
+            else:
+                tire_status = "Quá hạn"
+        
+        vehicles_with_tire_info.append({
+            "id": vehicle.id,
+            "license_plate": vehicle.license_plate,
+            "current_tire_type": current_tire_type,
+            "last_replacement_km": last_replacement_km,
+            "km_run": km_run,
+            "expected_lifespan": expected_lifespan,
+            "tire_status": tire_status
+        })
+    
+    return templates.TemplateResponse("theo-doi-vo-xe.html", {
+        "request": request,
+        "current_user": current_user,
+        "vehicles": vehicles_with_tire_info,
+        "today": today
+    })
+
+@app.get("/api/tire-types", response_class=JSONResponse)
+async def get_tire_types(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Lấy danh sách loại vỏ"""
+    if current_user is None:
+        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
+    
+    try:
+        tire_types = db.query(TireType).all()
+        return JSONResponse({
+            "success": True,
+            "tire_types": [{"tire_type": t.tire_type, "expected_lifespan_km": t.expected_lifespan_km} for t in tire_types]
+        })
+    except Exception as e:
+        return JSONResponse({
+            "success": False,
+            "error": f"Lỗi hệ thống: {str(e)}"
+        }, status_code=500)
+
+@app.get("/api/tire-replacement/detail/{vehicle_id}", response_class=JSONResponse)
+async def get_tire_replacement_detail(vehicle_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Lấy chi tiết lịch sử thay vỏ của xe"""
+    if current_user is None:
+        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
+    
+    # Kiểm tra xe có tồn tại và là "Xe Nhà"
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.id == vehicle_id,
+        Vehicle.status == 1,
+        Vehicle.vehicle_type == "Xe Nhà"
+    ).first()
+    
+    if not vehicle:
+        return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
+    
+    # Lấy danh sách thay vỏ
+    replacements = db.query(VehicleTireReplacement).filter(
+        VehicleTireReplacement.vehicle_id == vehicle_id
+    ).order_by(VehicleTireReplacement.replacement_date.desc()).all()
+    
+    result = []
+    for replacement in replacements:
+        # Lấy các items
+        items = db.query(VehicleTireReplacementItem).filter(
+            VehicleTireReplacementItem.replacement_id == replacement.id
+        ).all()
+        
+        result.append({
+            "id": replacement.id,
+            "replacement_date": replacement.replacement_date.strftime("%Y-%m-%d"),
+            "replacement_km": replacement.replacement_km,
+            "vat_rate": replacement.vat_rate,
+            "total_amount": replacement.total_amount,
+            "total_with_vat": replacement.total_with_vat,
+            "notes": replacement.notes or "",
+            "items": [
+                {
+                    "id": item.id,
+                    "tire_type": item.tire_type,
+                    "tire_brand": item.tire_brand or "",
+                    "position": item.position or "",
+                    "unit": item.unit or "cái",
+                    "quantity": item.quantity,
+                    "unit_price": item.unit_price,
+                    "total_price": item.total_price
+                }
+                for item in items
+            ]
+        })
+    
+    return JSONResponse({
+        "success": True,
+        "vehicle": {
+            "id": vehicle.id,
+            "license_plate": vehicle.license_plate
+        },
+        "replacements": result
+    })
+
+@app.get("/api/tire-replacement/get/{replacement_id}", response_class=JSONResponse)
+async def get_tire_replacement(replacement_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Lấy thông tin một lần thay vỏ"""
+    if current_user is None:
+        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
+    
+    try:
+        replacement = db.query(VehicleTireReplacement).filter(
+            VehicleTireReplacement.id == replacement_id
+        ).first()
+        
+        if not replacement:
+            return JSONResponse({"success": False, "error": "Không tìm thấy bản ghi thay vỏ"}, status_code=404)
+        
+        items = db.query(VehicleTireReplacementItem).filter(
+            VehicleTireReplacementItem.replacement_id == replacement_id
+        ).all()
+        
+        return JSONResponse({
+            "success": True,
+            "replacement": {
+                "id": replacement.id,
+                "replacement_date": replacement.replacement_date.strftime("%Y-%m-%d"),
+                "replacement_km": replacement.replacement_km,
+                "vat_rate": replacement.vat_rate,
+                "total_amount": replacement.total_amount,
+                "total_with_vat": replacement.total_with_vat,
+                "notes": replacement.notes or "",
+                "items": [
+                    {
+                        "id": item.id,
+                        "tire_type": item.tire_type,
+                        "tire_manufacturer": item.tire_manufacturer or "",
+                        "tire_brand": item.tire_brand or "",
+                        "position": item.position or "",
+                        "unit": item.unit or "cái",
+                        "quantity": item.quantity,
+                        "unit_price": item.unit_price,
+                        "total_price": item.total_price
+                    }
+                    for item in items
+                ]
+            }
+        })
+    except Exception as e:
+        return JSONResponse({
+            "success": False,
+            "error": f"Lỗi hệ thống: {str(e)}"
+        }, status_code=500)
+
+@app.post("/api/tire-replacement/add")
+async def add_tire_replacement(
+    request: Request,
+    vehicle_id: int = Form(...),
+    replacement_date: str = Form(...),
+    replacement_km: float = Form(...),
+    vat_rate: float = Form(0),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Thêm mới thay vỏ xe"""
+    if current_user is None:
+        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
+    
+    try:
+        # Kiểm tra xe có tồn tại và là "Xe Nhà"
+        vehicle = db.query(Vehicle).filter(
+            Vehicle.id == vehicle_id,
+            Vehicle.status == 1,
+            Vehicle.vehicle_type == "Xe Nhà"
+        ).first()
+        
+        if not vehicle:
+            return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
+        
+        # Parse ngày thay vỏ
+        try:
+            replacement_date_obj = datetime.strptime(replacement_date, "%Y-%m-%d").date()
+        except ValueError:
+            return JSONResponse({"success": False, "error": "Ngày thay vỏ không hợp lệ"}, status_code=400)
+        
+        # Lấy dữ liệu items từ form (JSON string)
+        form_data = await request.form()
+        items_json = form_data.get("items", "[]")
+        
+        import json
+        try:
+            items_data = json.loads(items_json)
+        except json.JSONDecodeError as e:
+            return JSONResponse({
+                "success": False,
+                "error": f"Dữ liệu items không hợp lệ: {str(e)}"
+            }, status_code=400)
+        
+        if not items_data or len(items_data) == 0:
+            return JSONResponse({
+                "success": False,
+                "error": "Vui lòng thêm ít nhất một vỏ"
+            }, status_code=400)
+        
+        # Tính tổng tiền
+        total_amount = 0
+        tire_items = []
+        
+        for item_data in items_data:
+            try:
+                tire_type = str(item_data.get("tire_type", "")).strip()
+                if not tire_type:
+                    continue  # Bỏ qua item không có tire_type
+                    
+                quantity = float(item_data.get("quantity", 0))
+                unit_price = float(item_data.get("unit_price", 0))
+                total_price = quantity * unit_price
+                total_amount += total_price
+                
+                tire_items.append({
+                    "tire_type": tire_type,
+                    "tire_manufacturer": str(item_data.get("tire_manufacturer", "")).strip(),
+                    "tire_brand": str(item_data.get("tire_brand", "")).strip(),
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "total_price": total_price
+                })
+            except (ValueError, TypeError) as e:
+                return JSONResponse({
+                    "success": False,
+                    "error": f"Dữ liệu item không hợp lệ: {str(e)}"
+                }, status_code=400)
+        
+        if len(tire_items) == 0:
+            return JSONResponse({
+                "success": False,
+                "error": "Vui lòng thêm ít nhất một vỏ hợp lệ"
+            }, status_code=400)
+        
+        # Tính tổng có VAT
+        vat_amount = total_amount * (vat_rate / 100)
+        total_with_vat = total_amount + vat_amount
+        
+        # Tạo bản ghi thay vỏ
+        replacement = VehicleTireReplacement(
+            vehicle_id=vehicle_id,
+            replacement_date=replacement_date_obj,
+            replacement_km=replacement_km,
+            vat_rate=vat_rate,
+            total_amount=total_amount,
+            total_with_vat=total_with_vat,
+            notes=notes
+        )
+        db.add(replacement)
+        db.flush()  # Để lấy ID
+        
+        # Thu thập tất cả các tire_type duy nhất và tạo chúng trước
+        unique_tire_types = set()
+        for item_data in tire_items:
+            tire_type = item_data.get("tire_type", "").strip()
+            if tire_type and tire_type not in unique_tire_types:
+                unique_tire_types.add(tire_type)
+                # Kiểm tra xem tire_type đã tồn tại chưa
+                tire_type_record = db.query(TireType).filter(
+                    TireType.tire_type == tire_type
+                ).first()
+                if not tire_type_record:
+                    try:
+                        new_tire_type = TireType(
+                            tire_type=tire_type,
+                            expected_lifespan_km=0  # Mặc định 0, có thể cập nhật sau
+                        )
+                        db.add(new_tire_type)
+                        db.flush()  # Flush ngay để kiểm tra unique constraint
+                    except Exception:
+                        # Nếu lỗi (có thể do unique constraint), rollback và kiểm tra lại
+                        db.rollback()
+                        # Kiểm tra lại xem có tồn tại không (có thể đã được tạo bởi transaction khác)
+                        tire_type_record = db.query(TireType).filter(
+                            TireType.tire_type == tire_type
+                        ).first()
+                        if not tire_type_record:
+                            raise  # Nếu vẫn không tồn tại, raise lại lỗi
+        
+        # Flush để đảm bảo tất cả TireType được tạo trước khi tạo items
+        db.flush()
+        
+        # Tạo các items
+        for item_data in tire_items:
+            tire_type = item_data.get("tire_type", "").strip()
+            if not tire_type:
+                continue  # Bỏ qua item không có tire_type
+                
+            item = VehicleTireReplacementItem(
+                replacement_id=replacement.id,
+                tire_type=tire_type,
+                tire_manufacturer=item_data.get("tire_manufacturer", "").strip(),
+                tire_brand=item_data.get("tire_brand", "").strip(),
+                position=None,  # Không sử dụng nữa
+                unit=None,  # Không sử dụng nữa
+                quantity=item_data.get("quantity", 0),
+                unit_price=item_data.get("unit_price", 0),
+                total_price=item_data.get("total_price", 0)
+            )
+            db.add(item)
+        
+        db.commit()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã thêm thay vỏ thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in add_tire_replacement: {error_trace}")  # Log để debug
+        return JSONResponse({
+            "success": False,
+            "error": f"Lỗi hệ thống: {str(e)}"
+        }, status_code=500)
+
+@app.put("/api/tire-replacement/edit/{replacement_id}")
+async def edit_tire_replacement(
+    replacement_id: int,
+    request: Request,
+    replacement_date: str = Form(...),
+    replacement_km: float = Form(...),
+    vat_rate: float = Form(0),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Sửa thay vỏ xe"""
+    if current_user is None:
+        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
+    
+    try:
+        # Kiểm tra thay vỏ có tồn tại
+        replacement = db.query(VehicleTireReplacement).filter(
+            VehicleTireReplacement.id == replacement_id
+        ).first()
+        
+        if not replacement:
+            return JSONResponse({"success": False, "error": "Không tìm thấy bản ghi thay vỏ"}, status_code=404)
+        
+        # Kiểm tra xe có tồn tại và là "Xe Nhà"
+        vehicle = db.query(Vehicle).filter(
+            Vehicle.id == replacement.vehicle_id,
+            Vehicle.status == 1,
+            Vehicle.vehicle_type == "Xe Nhà"
+        ).first()
+        
+        if not vehicle:
+            return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
+        
+        # Parse ngày thay vỏ
+        try:
+            replacement_date_obj = datetime.strptime(replacement_date, "%Y-%m-%d").date()
+        except ValueError:
+            return JSONResponse({"success": False, "error": "Ngày thay vỏ không hợp lệ"}, status_code=400)
+        
+        # Lấy dữ liệu items từ form (JSON string)
+        form_data = await request.form()
+        items_json = form_data.get("items", "[]")
+        
+        import json
+        try:
+            items_data = json.loads(items_json)
+        except json.JSONDecodeError:
+            items_data = []
+        
+        # Tính tổng tiền
+        total_amount = 0
+        tire_items = []
+        
+        for item_data in items_data:
+            quantity = float(item_data.get("quantity", 0))
+            unit_price = float(item_data.get("unit_price", 0))
+            total_price = quantity * unit_price
+            total_amount += total_price
+            
+            tire_items.append({
+                "tire_type": item_data.get("tire_type", ""),
+                "tire_manufacturer": item_data.get("tire_manufacturer", ""),
+                "tire_brand": item_data.get("tire_brand", ""),
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "total_price": total_price
+            })
+        
+        # Tính tổng có VAT
+        vat_amount = total_amount * (vat_rate / 100)
+        total_with_vat = total_amount + vat_amount
+        
+        # Xóa các items cũ
+        db.query(VehicleTireReplacementItem).filter(
+            VehicleTireReplacementItem.replacement_id == replacement_id
+        ).delete()
+        
+        # Cập nhật thay vỏ
+        replacement.replacement_date = replacement_date_obj
+        replacement.replacement_km = replacement_km
+        replacement.vat_rate = vat_rate
+        replacement.total_amount = total_amount
+        replacement.total_with_vat = total_with_vat
+        replacement.notes = notes
+        
+        # Thu thập tất cả các tire_type duy nhất và tạo chúng trước
+        unique_tire_types = set()
+        for item_data in tire_items:
+            tire_type = item_data["tire_type"]
+            if tire_type and tire_type not in unique_tire_types:
+                unique_tire_types.add(tire_type)
+                # Kiểm tra xem tire_type đã tồn tại chưa
+                tire_type_record = db.query(TireType).filter(
+                    TireType.tire_type == tire_type
+                ).first()
+                if not tire_type_record:
+                    new_tire_type = TireType(
+                        tire_type=tire_type,
+                        expected_lifespan_km=0  # Mặc định 0, có thể cập nhật sau
+                    )
+                    db.add(new_tire_type)
+        
+        # Tạo các items mới
+        for item_data in tire_items:
+            item = VehicleTireReplacementItem(
+                replacement_id=replacement.id,
+                tire_type=item_data["tire_type"],
+                tire_manufacturer=item_data["tire_manufacturer"],
+                tire_brand=item_data["tire_brand"],
+                position=None,  # Không sử dụng nữa
+                unit=None,  # Không sử dụng nữa
+                quantity=item_data["quantity"],
+                unit_price=item_data["unit_price"],
+                total_price=item_data["total_price"]
+            )
+            db.add(item)
+        
+        db.commit()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã cập nhật thay vỏ thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "error": f"Lỗi hệ thống: {str(e)}"
+        }, status_code=500)
+
+@app.delete("/api/tire-replacement/delete/{replacement_id}")
+async def delete_tire_replacement(
+    replacement_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Xóa thay vỏ xe"""
+    if current_user is None:
+        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
+    
+    try:
+        # Kiểm tra thay vỏ có tồn tại
+        replacement = db.query(VehicleTireReplacement).filter(
+            VehicleTireReplacement.id == replacement_id
+        ).first()
+        
+        if not replacement:
+            return JSONResponse({"success": False, "error": "Không tìm thấy bản ghi thay vỏ"}, status_code=404)
+        
+        # Kiểm tra xe có tồn tại và là "Xe Nhà"
+        vehicle = db.query(Vehicle).filter(
+            Vehicle.id == replacement.vehicle_id,
+            Vehicle.status == 1,
+            Vehicle.vehicle_type == "Xe Nhà"
+        ).first()
+        
+        if not vehicle:
+            return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
+        
+        # Xóa các items (cascade sẽ tự động xóa do relationship)
+        db.query(VehicleTireReplacementItem).filter(
+            VehicleTireReplacementItem.replacement_id == replacement_id
+        ).delete()
+        
+        # Xóa thay vỏ
+        db.delete(replacement)
+        db.commit()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã xóa thay vỏ thành công"
         })
         
     except Exception as e:

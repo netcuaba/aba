@@ -90,7 +90,7 @@
     <div class="modal-content modal-fullscreen">
         <div class="modal-header">
             <h3>➕ Thêm mới bảo dưỡng</h3>
-            <span class="close" onclick="closeAddMaintenanceModal()">&times;</span>
+            <span class="close" onclick="closeAddMaintenanceModal()" title="Đóng">&times;</span>
         </div>
         <div class="modal-body modal-body-fullscreen">
             <form id="addMaintenanceForm">
@@ -161,6 +161,30 @@
                     <button type="submit" class="btn btn-success" id="submitBtn" disabled>Lưu</button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Xác nhận đóng form -->
+<div id="closeConfirmationModal" class="modal" style="display: none; z-index: 2000;">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header" style="background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);">
+            <h3>⚠️ Xác nhận đóng form</h3>
+            <span class="close" onclick="closeConfirmationModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p style="font-size: 16px; line-height: 1.6; color: #2c3e50;">
+                Bạn có chắc chắn muốn đóng?<br>
+                <strong style="color: #e74c3c;">Dữ liệu đã nhập sẽ không được lưu.</strong>
+            </p>
+        </div>
+        <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button type="button" class="btn btn-primary" onclick="continueEditing()" style="background: linear-gradient(135deg, #42a5f5 0%, #2196f3 100%);">
+                Tiếp tục nhập
+            </button>
+            <button type="button" class="btn btn-danger" onclick="confirmCloseWithoutSave()" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
+                Đóng & không lưu
+            </button>
         </div>
     </div>
 </div>
@@ -578,6 +602,8 @@
 let currentVehicleId = null;
 let currentLicensePlate = null;
 let itemCounter = 0;
+let addMaintenanceFormInitialState = null; // Lưu trạng thái ban đầu của form
+let pendingCloseAction = null; // Lưu hành động đóng đang chờ xác nhận
 
 // Mở modal chi tiết
 async function openDetailModal(vehicleId, licensePlate) {
@@ -677,12 +703,161 @@ async function loadMaintenanceList(vehicleId) {
     }
 }
 
+// Lưu trạng thái ban đầu của form (chỉ lưu một lần, không cập nhật lại)
+function saveAddMaintenanceFormState() {
+    // Chỉ lưu nếu chưa có trạng thái ban đầu
+    if (addMaintenanceFormInitialState !== null) {
+        return;
+    }
+    
+    const dateValue = document.getElementById('maintenance_date').value;
+    const kmValue = document.getElementById('maintenance_km').value;
+    const vatValue = document.getElementById('vat_rate').value;
+    const itemsContainer = document.getElementById('maintenanceItemsContainer');
+    
+    // Lưu các items
+    const items = [];
+    const rows = itemsContainer.querySelectorAll('.maintenance-item-row');
+    rows.forEach(row => {
+        items.push({
+            content: row.querySelector('.item-content').value.trim(),
+            unit: row.querySelector('.item-unit').value.trim(),
+            quantity: row.querySelector('.item-quantity').value,
+            unitPrice: row.querySelector('.item-unit-price').value,
+            discount: row.querySelector('.item-discount').value
+        });
+    });
+    
+    addMaintenanceFormInitialState = {
+        date: dateValue,
+        km: kmValue,
+        vat: vatValue,
+        items: items,
+        itemCount: itemCounter
+    };
+}
+
+// Cập nhật trạng thái ban đầu (chỉ dùng khi tự động tạo items mặc định)
+function updateAddMaintenanceFormInitialState() {
+    const dateValue = document.getElementById('maintenance_date').value;
+    const kmValue = document.getElementById('maintenance_km').value;
+    const vatValue = document.getElementById('vat_rate').value;
+    const itemsContainer = document.getElementById('maintenanceItemsContainer');
+    
+    // Lưu các items
+    const items = [];
+    const rows = itemsContainer.querySelectorAll('.maintenance-item-row');
+    rows.forEach(row => {
+        items.push({
+            content: row.querySelector('.item-content').value.trim(),
+            unit: row.querySelector('.item-unit').value.trim(),
+            quantity: row.querySelector('.item-quantity').value,
+            unitPrice: row.querySelector('.item-unit-price').value,
+            discount: row.querySelector('.item-discount').value
+        });
+    });
+    
+    addMaintenanceFormInitialState = {
+        date: dateValue,
+        km: kmValue,
+        vat: vatValue,
+        items: items,
+        itemCount: itemCounter
+    };
+}
+
+// Kiểm tra xem form có thay đổi không
+function hasAddMaintenanceFormChanged() {
+    if (!addMaintenanceFormInitialState) return false;
+    
+    const currentDate = document.getElementById('maintenance_date').value || '';
+    const currentKm = document.getElementById('maintenance_km').value || '';
+    const currentVat = document.getElementById('vat_rate').value || '0';
+    const itemsContainer = document.getElementById('maintenanceItemsContainer');
+    
+    const savedDate = addMaintenanceFormInitialState.date || '';
+    const savedKm = addMaintenanceFormInitialState.km || '';
+    const savedVat = addMaintenanceFormInitialState.vat || '0';
+    
+    // Kiểm tra các trường cơ bản
+    if (currentDate !== savedDate ||
+        currentKm !== savedKm ||
+        currentVat !== savedVat ||
+        itemCounter !== addMaintenanceFormInitialState.itemCount) {
+        return true;
+    }
+    
+    // Kiểm tra các items
+    const currentRows = itemsContainer.querySelectorAll('.maintenance-item-row');
+    if (currentRows.length !== addMaintenanceFormInitialState.items.length) {
+        return true;
+    }
+    
+    for (let i = 0; i < currentRows.length; i++) {
+        const row = currentRows[i];
+        const savedItem = addMaintenanceFormInitialState.items[i];
+        
+        const currentContent = (row.querySelector('.item-content').value || '').trim();
+        const currentUnit = (row.querySelector('.item-unit').value || '').trim();
+        const currentQuantity = row.querySelector('.item-quantity').value || '0';
+        const currentUnitPrice = row.querySelector('.item-unit-price').value || '0';
+        const currentDiscount = row.querySelector('.item-discount').value || '0';
+        
+        const savedContent = (savedItem.content || '').trim();
+        const savedUnit = (savedItem.unit || '').trim();
+        const savedQuantity = savedItem.quantity || '0';
+        const savedUnitPrice = savedItem.unitPrice || '0';
+        const savedDiscount = savedItem.discount || '0';
+        
+        if (currentContent !== savedContent ||
+            currentUnit !== savedUnit ||
+            currentQuantity !== savedQuantity ||
+            currentUnitPrice !== savedUnitPrice ||
+            currentDiscount !== savedDiscount) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// Hiển thị modal xác nhận đóng
+function showCloseConfirmation(closeAction) {
+    pendingCloseAction = closeAction;
+    document.getElementById('closeConfirmationModal').style.display = 'block';
+}
+
+// Đóng modal xác nhận
+function closeConfirmationModal() {
+    document.getElementById('closeConfirmationModal').style.display = 'none';
+    pendingCloseAction = null;
+}
+
+// Tiếp tục chỉnh sửa (quay lại form)
+function continueEditing() {
+    closeConfirmationModal();
+}
+
+// Xác nhận đóng và không lưu
+function confirmCloseWithoutSave() {
+    // Lưu hành động đóng vào biến tạm trước khi đóng modal
+    const actionToExecute = pendingCloseAction;
+    closeConfirmationModal();
+    // Thực thi hành động đóng form sau khi đóng modal xác nhận
+    if (actionToExecute) {
+        actionToExecute();
+    }
+}
+
 // Mở modal thêm mới
 function openAddMaintenanceModal() {
     if (!currentVehicleId) {
         alert('Vui lòng chọn xe trước');
         return;
     }
+    
+    // Reset trạng thái ban đầu trước khi mở form mới
+    addMaintenanceFormInitialState = null;
     
     document.getElementById('maintenance_vehicle_id').value = currentVehicleId;
     document.getElementById('addMaintenanceForm').reset();
@@ -691,6 +866,9 @@ function openAddMaintenanceModal() {
     document.getElementById('submitBtn').disabled = true;
     itemCounter = 0;
     calculateTotal();
+    
+    // Lưu trạng thái ban đầu (sau khi reset form)
+    saveAddMaintenanceFormState();
     
     document.getElementById('addMaintenanceModal').style.display = 'block';
     
@@ -702,12 +880,14 @@ function openAddMaintenanceModal() {
         if (dateInput.value && kmInput.value) {
             document.getElementById('step2Section').style.display = 'block';
             document.getElementById('submitBtn').disabled = false;
-            // Tự động tạo 5 dòng mặc định nếu chưa có
-            if (itemCounter === 0) {
-                for (let i = 0; i < 5; i++) {
-                    addMaintenanceItem();
+                // Tự động tạo 5 dòng mặc định nếu chưa có
+                if (itemCounter === 0) {
+                    for (let i = 0; i < 5; i++) {
+                        addMaintenanceItem();
+                    }
+                    // Cập nhật lại trạng thái ban đầu sau khi thêm items (vì đây là trạng thái ban đầu thực sự)
+                    updateAddMaintenanceFormInitialState();
                 }
-            }
         } else {
             document.getElementById('step2Section').style.display = 'none';
             document.getElementById('submitBtn').disabled = true;
@@ -718,13 +898,23 @@ function openAddMaintenanceModal() {
     kmInput.oninput = checkStep1;
 }
 
-// Đóng modal thêm mới
-function closeAddMaintenanceModal() {
+// Đóng modal thêm mới (hàm thực sự đóng form)
+function closeAddMaintenanceModal(force = false) {
+    if (!force && hasAddMaintenanceFormChanged()) {
+        // Có thay đổi, hiển thị popup xác nhận
+        showCloseConfirmation(() => {
+            closeAddMaintenanceModal(true);
+        });
+        return;
+    }
+    
+    // Không có thay đổi hoặc đã xác nhận, đóng form
     document.getElementById('addMaintenanceModal').style.display = 'none';
     document.getElementById('addMaintenanceForm').reset();
     document.getElementById('step2Section').style.display = 'none';
     document.getElementById('maintenanceItemsContainer').innerHTML = '';
     itemCounter = 0;
+    addMaintenanceFormInitialState = null;
 }
 
 // Thêm dòng hạng mục
@@ -865,7 +1055,7 @@ document.getElementById('addMaintenanceForm').addEventListener('submit', async f
         
         if (data.success) {
             alert('Đã thêm bảo dưỡng thành công!');
-            closeAddMaintenanceModal();
+            closeAddMaintenanceModal(true); // Force close vì đã lưu thành công
             await loadMaintenanceList(vehicleId);
             // Reload trang để cập nhật số km gần nhất
             location.reload();
@@ -882,11 +1072,18 @@ window.onclick = function(event) {
     const detailModal = document.getElementById('detailModal');
     const addModal = document.getElementById('addMaintenanceModal');
     const editModal = document.getElementById('editMaintenanceModal');
+    const confirmationModal = document.getElementById('closeConfirmationModal');
+    
+    // Nếu click vào modal xác nhận, không làm gì
+    if (event.target === confirmationModal) {
+        return;
+    }
     
     if (event.target === detailModal) {
         closeDetailModal();
     }
     if (event.target === addModal) {
+        // Kiểm tra thay đổi trước khi đóng
         closeAddMaintenanceModal();
     }
     if (event.target === editModal) {
