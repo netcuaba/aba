@@ -169,7 +169,7 @@
 .data-table th {
     background: #34495e;
     color: white;
-    padding: 8px 4px;
+    padding: 10px 8px;
     text-align: left;
     font-weight: 600;
     font-size: 12px;
@@ -180,16 +180,12 @@
 }
 
 /* Column width adjustments */
-.data-table th:nth-child(1), .data-table td:nth-child(1) { width: 45px; min-width: 45px; } /* STT */
-.data-table th:nth-child(2), .data-table td:nth-child(2) { width: 90px; min-width: 90px; } /* Ngày */
-.data-table th:nth-child(3), .data-table td:nth-child(3) { width: 135px; min-width: 135px; } /* Biển số xe */
-.data-table th:nth-child(4), .data-table td:nth-child(4) { width: 95px; min-width: 95px; } /* Mã tuyến */
+.data-table th:nth-child(1), .data-table td:nth-child(1) { width: 50px; } /* STT */
+.data-table th:nth-child(2), .data-table td:nth-child(2) { width: 100px; } /* Ngày */
+.data-table th:nth-child(3), .data-table td:nth-child(3) { width: 120px; } /* Biển số xe */
+.data-table th:nth-child(4), .data-table td:nth-child(4) { width: 100px; } /* Mã tuyến */
 /* Status column */
-.data-table th.status-column,
-.data-table td[data-field="status"] { 
-    width: 75px; 
-    min-width: 75px; 
-}
+.data-table td[data-field="status"] { width: 90px; }
 /* Loại tuyến - ẩn mặc định cho các sheet không phải Tăng cường */
 .data-table td[data-field="route_type"] {
     display: none !important;
@@ -197,12 +193,12 @@
 /* Loại tuyến - hiển thị cho sheet Tăng cường */
 .data-table.sheet-tang-cuong td[data-field="route_type"] {
     display: table-cell !important;
-    width: 140px;
-    min-width: 140px;
+    width: 120px;
+    min-width: 120px;
 }
 .data-table.sheet-tang-cuong th:nth-child(5) {
-    width: 140px;
-    min-width: 140px;
+    width: 120px;
+    min-width: 120px;
 }
 /* Lộ trình - fixed width ~300px với wrap text và auto height */
 /* Header cho cột Lộ trình */
@@ -217,7 +213,7 @@
     width: 300px;
     min-width: 300px;
     max-width: 300px;
-    padding: 6px 4px;
+    padding: 8px;
     vertical-align: top;
     position: static;
     word-break: break-word;
@@ -238,7 +234,7 @@
     height: auto;
     resize: vertical;
     box-sizing: border-box;
-    padding: 4px 6px;
+    padding: 6px 8px;
     margin: 0;
     border: 1px solid #e9ecef;
     border-radius: 6px;
@@ -247,20 +243,20 @@
     overflow: visible;
 }
 /* Các cột còn lại */
-/* Km chuyến - tăng độ rộng để hiển thị đầy đủ */
+/* Km chuyến - giảm độ rộng */
 .data-table th.distance-column,
-.data-table td[data-field="distance_km"] { width: 90px; min-width: 90px; }
+.data-table td[data-field="distance_km"] { width: 70px; min-width: 70px; }
 /* Đơn giá - giảm độ rộng */
 .data-table th.unit-price-column,
 .data-table td[data-field="unit_price"] { width: 85px; min-width: 85px; }
-.data-table td[data-field="bridge_fee"] { width: 105px; min-width: 105px; }
-.data-table td[data-field="loading_fee"] { width: 95px; min-width: 95px; }
-.data-table td[data-total] { width: 115px; min-width: 115px; }
+.data-table td[data-field="bridge_fee"] { width: 110px; }
+.data-table td[data-field="loading_fee"] { width: 100px; }
+.data-table td[data-total] { width: 120px; }
 /* Lái xe - tăng độ rộng để hiển thị đầy đủ tên */
 .data-table th.driver-column,
 .data-table td[data-field="driver_name"] { 
-    width: 190px; 
-    min-width: 190px; 
+    width: 200px; 
+    min-width: 200px; 
     white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
@@ -269,8 +265,8 @@
     width: 100%;
     overflow: visible;
 }
-.data-table td[data-field="trip_code"] { width: 170px; min-width: 170px; }
-.data-table td[data-field="notes"] { width: 170px; min-width: 170px; }
+.data-table td[data-field="trip_code"] { width: 175px; }
+.data-table td[data-field="notes"] { width: 175px; }
 
 /* Style cho các field bị khóa khi Status = OFF */
 .data-table td .input-control:disabled,
@@ -322,7 +318,7 @@
 }
 
 .data-table td {
-    padding: 6px 4px;
+    padding: 8px;
     border-bottom: 1px solid #ecf0f1;
     vertical-align: middle;
     font-size: 12px;
@@ -397,7 +393,7 @@
 
 .input-control, .select-control {
     width: 100%;
-    padding: 4px 6px;
+    padding: 6px 8px;
     border: 1px solid #e9ecef;
     border-radius: 6px;
     font-size: 12px;
@@ -901,7 +897,7 @@ function renderActiveSheet() {
                     <th>Biển số xe</th>
                     <th>Mã tuyến</th>
                     ${isTangCuong ? '<th>Loại tuyến</th>' : ''}
-                    ${!isTangCuong ? '<th class="status-column">Status</th>' : ''}
+                    ${!isTangCuong ? '<th>Status</th>' : ''}
                     <th class="itinerary-column">Lộ trình</th>
                     <th class="distance-column">Km chuyến</th>
                     <th class="unit-price-column">Đơn giá</th>

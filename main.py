@@ -126,7 +126,6 @@ class Vehicle(Base):
     # Relationships
     routes = relationship("Route", back_populates="vehicle")
     maintenances = relationship("VehicleMaintenance", back_populates="vehicle")
-    tire_replacements = relationship("VehicleTireReplacement", back_populates="vehicle")
 
 class VehicleMaintenance(Base):
     """Bảng quản lý bảo dưỡng xe"""
@@ -161,52 +160,6 @@ class VehicleMaintenanceItem(Base):
     
     # Relationships
     maintenance = relationship("VehicleMaintenance", back_populates="items")
-
-class VehicleTireReplacement(Base):
-    """Bảng quản lý thay vỏ xe"""
-    __tablename__ = "vehicle_tire_replacements"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
-    replacement_date = Column(Date, nullable=False)  # Ngày thay vỏ
-    replacement_km = Column(Float, nullable=False)  # Số km tại thời điểm thay
-    vat_rate = Column(Float, default=0)  # VAT (%): 0, 5, 8, 10
-    total_amount = Column(Float, default=0)  # Tổng cộng (chưa VAT)
-    total_with_vat = Column(Float, default=0)  # Tổng cộng (bao gồm VAT)
-    notes = Column(String)  # Ghi chú
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    vehicle = relationship("Vehicle", back_populates="tire_replacements")
-    items = relationship("VehicleTireReplacementItem", back_populates="replacement", cascade="all, delete-orphan")
-
-class VehicleTireReplacementItem(Base):
-    """Bảng chi tiết vỏ thay"""
-    __tablename__ = "vehicle_tire_replacement_items"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    replacement_id = Column(Integer, ForeignKey("vehicle_tire_replacements.id"), nullable=False)
-    tire_type = Column(String, nullable=False)  # Loại vỏ (VD: Michelin X)
-    tire_manufacturer = Column(String)  # Hãng vỏ (VD: Michelin, Bridgestone)
-    tire_brand = Column(String)  # Seri vỏ
-    position = Column(String)  # Vị trí bánh (Trước trái, Trước phải, Sau trái, Sau phải, ...)
-    unit = Column(String, default="cái")  # Đơn vị tính (ĐVT)
-    quantity = Column(Float, default=0)  # Số lượng (SL)
-    unit_price = Column(Float, default=0)  # Đơn giá
-    total_price = Column(Float, default=0)  # Thành tiền = SL × Đơn giá
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    replacement = relationship("VehicleTireReplacement", back_populates="items")
-
-class TireType(Base):
-    """Bảng quản lý loại vỏ và tuổi thọ"""
-    __tablename__ = "tire_types"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    tire_type = Column(String, nullable=False, unique=True)  # Loại vỏ (VD: Michelin X)
-    expected_lifespan_km = Column(Float, default=0)  # Tuổi thọ dự kiến (km)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Route(Base):
     __tablename__ = "routes"
@@ -554,37 +507,6 @@ try:
     migrate_maintenance_items()
 except Exception as e:
     print(f"Migration error for vehicle_maintenance_items (may be expected if table doesn't exist yet): {e}")
-
-# Migration: Thêm cột tire_manufacturer vào bảng vehicle_tire_replacement_items nếu chưa có
-def migrate_tire_replacement_items():
-    """Thêm cột tire_manufacturer vào bảng vehicle_tire_replacement_items nếu chưa có"""
-    from sqlalchemy import inspect, text
-    
-    try:
-        inspector = inspect(engine)
-        # Kiểm tra xem bảng có tồn tại không
-        if 'vehicle_tire_replacement_items' not in inspector.get_table_names():
-            print("Table vehicle_tire_replacement_items does not exist yet, will be created by create_all")
-            return
-        
-        existing_columns = [col['name'] for col in inspector.get_columns('vehicle_tire_replacement_items')]
-        
-        if 'tire_manufacturer' not in existing_columns:
-            with engine.connect() as conn:
-                try:
-                    conn.execute(text("ALTER TABLE vehicle_tire_replacement_items ADD COLUMN tire_manufacturer VARCHAR"))
-                    conn.commit()
-                    print("Added column tire_manufacturer to vehicle_tire_replacement_items")
-                except Exception as e:
-                    print(f"Error adding column tire_manufacturer: {e}")
-                    conn.rollback()
-    except Exception as e:
-        print(f"Migration error for vehicle_tire_replacement_items: {e}")
-
-try:
-    migrate_tire_replacement_items()
-except Exception as e:
-    print(f"Migration error for vehicle_tire_replacement_items (may be expected if table doesn't exist yet): {e}")
 
 # Dependency để lấy database session
 def get_db():
@@ -2008,572 +1930,6 @@ async def delete_maintenance(
         return JSONResponse({
             "success": True,
             "message": "Đã xóa bảo dưỡng thành công"
-        })
-        
-    except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "error": f"Lỗi hệ thống: {str(e)}"
-        }, status_code=500)
-
-# ==================== THEO DÕI VỎ XE ====================
-
-@app.get("/theo-doi-vo-xe", response_class=HTMLResponse)
-async def tire_tracking_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    """Trang danh sách theo dõi vỏ xe"""
-    # Nếu chưa đăng nhập, redirect về login
-    if current_user is None:
-        return RedirectResponse(url="/login", status_code=303)
-    
-    # Chỉ Admin và User mới được truy cập
-    if current_user["role"] not in ["Admin", "User"]:
-        return RedirectResponse(url="/login", status_code=303)
-    
-    # Lấy danh sách xe có loại = "Xe Nhà"
-    vehicles = db.query(Vehicle).filter(
-        Vehicle.status == 1,
-        Vehicle.vehicle_type == "Xe Nhà"
-    ).all()
-    
-    # Tính thông tin vỏ cho mỗi xe
-    today = date.today()
-    vehicles_with_tire_info = []
-    
-    for vehicle in vehicles:
-        # Lấy lần thay vỏ gần nhất
-        last_replacement = db.query(VehicleTireReplacement).filter(
-            VehicleTireReplacement.vehicle_id == vehicle.id
-        ).order_by(VehicleTireReplacement.replacement_date.desc()).first()
-        
-        # Lấy số km hiện tại từ bảo dưỡng gần nhất
-        last_maintenance = db.query(VehicleMaintenance).filter(
-            VehicleMaintenance.vehicle_id == vehicle.id,
-            VehicleMaintenance.maintenance_date <= today
-        ).order_by(VehicleMaintenance.maintenance_date.desc()).first()
-        
-        current_km = last_maintenance.maintenance_km if last_maintenance else None
-        last_replacement_km = last_replacement.replacement_km if last_replacement else None
-        
-        # Tính số km đã chạy
-        km_run = None
-        if current_km and last_replacement_km:
-            km_run = current_km - last_replacement_km
-        
-        # Lấy loại vỏ đang sử dụng (từ lần thay gần nhất)
-        current_tire_type = None
-        expected_lifespan = None
-        if last_replacement and last_replacement.items:
-            # Lấy loại vỏ từ item đầu tiên (hoặc có thể lấy từ nhiều items)
-            first_item = last_replacement.items[0]
-            current_tire_type = first_item.tire_type
-            
-            # Lấy tuổi thọ dự kiến từ bảng tire_types
-            tire_type_record = db.query(TireType).filter(
-                TireType.tire_type == current_tire_type
-            ).first()
-            if tire_type_record:
-                expected_lifespan = tire_type_record.expected_lifespan_km
-        
-        # Tính trạng thái vỏ
-        tire_status = None
-        if km_run is not None and expected_lifespan and expected_lifespan > 0:
-            percentage = (km_run / expected_lifespan) * 100
-            if percentage < 80:
-                tire_status = "Bình thường"
-            elif percentage < 100:
-                tire_status = "Sắp tới hạn"
-            else:
-                tire_status = "Quá hạn"
-        
-        vehicles_with_tire_info.append({
-            "id": vehicle.id,
-            "license_plate": vehicle.license_plate,
-            "current_tire_type": current_tire_type,
-            "last_replacement_km": last_replacement_km,
-            "km_run": km_run,
-            "expected_lifespan": expected_lifespan,
-            "tire_status": tire_status
-        })
-    
-    return templates.TemplateResponse("theo-doi-vo-xe.html", {
-        "request": request,
-        "current_user": current_user,
-        "vehicles": vehicles_with_tire_info,
-        "today": today
-    })
-
-@app.get("/api/tire-types", response_class=JSONResponse)
-async def get_tire_types(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    """Lấy danh sách loại vỏ"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
-    try:
-        tire_types = db.query(TireType).all()
-        return JSONResponse({
-            "success": True,
-            "tire_types": [{"tire_type": t.tire_type, "expected_lifespan_km": t.expected_lifespan_km} for t in tire_types]
-        })
-    except Exception as e:
-        return JSONResponse({
-            "success": False,
-            "error": f"Lỗi hệ thống: {str(e)}"
-        }, status_code=500)
-
-@app.get("/api/tire-replacement/detail/{vehicle_id}", response_class=JSONResponse)
-async def get_tire_replacement_detail(vehicle_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    """Lấy chi tiết lịch sử thay vỏ của xe"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
-    # Kiểm tra xe có tồn tại và là "Xe Nhà"
-    vehicle = db.query(Vehicle).filter(
-        Vehicle.id == vehicle_id,
-        Vehicle.status == 1,
-        Vehicle.vehicle_type == "Xe Nhà"
-    ).first()
-    
-    if not vehicle:
-        return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
-    
-    # Lấy danh sách thay vỏ
-    replacements = db.query(VehicleTireReplacement).filter(
-        VehicleTireReplacement.vehicle_id == vehicle_id
-    ).order_by(VehicleTireReplacement.replacement_date.desc()).all()
-    
-    result = []
-    for replacement in replacements:
-        # Lấy các items
-        items = db.query(VehicleTireReplacementItem).filter(
-            VehicleTireReplacementItem.replacement_id == replacement.id
-        ).all()
-        
-        result.append({
-            "id": replacement.id,
-            "replacement_date": replacement.replacement_date.strftime("%Y-%m-%d"),
-            "replacement_km": replacement.replacement_km,
-            "vat_rate": replacement.vat_rate,
-            "total_amount": replacement.total_amount,
-            "total_with_vat": replacement.total_with_vat,
-            "notes": replacement.notes or "",
-            "items": [
-                {
-                    "id": item.id,
-                    "tire_type": item.tire_type,
-                    "tire_brand": item.tire_brand or "",
-                    "position": item.position or "",
-                    "unit": item.unit or "cái",
-                    "quantity": item.quantity,
-                    "unit_price": item.unit_price,
-                    "total_price": item.total_price
-                }
-                for item in items
-            ]
-        })
-    
-    return JSONResponse({
-        "success": True,
-        "vehicle": {
-            "id": vehicle.id,
-            "license_plate": vehicle.license_plate
-        },
-        "replacements": result
-    })
-
-@app.get("/api/tire-replacement/get/{replacement_id}", response_class=JSONResponse)
-async def get_tire_replacement(replacement_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    """Lấy thông tin một lần thay vỏ"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
-    try:
-        replacement = db.query(VehicleTireReplacement).filter(
-            VehicleTireReplacement.id == replacement_id
-        ).first()
-        
-        if not replacement:
-            return JSONResponse({"success": False, "error": "Không tìm thấy bản ghi thay vỏ"}, status_code=404)
-        
-        items = db.query(VehicleTireReplacementItem).filter(
-            VehicleTireReplacementItem.replacement_id == replacement_id
-        ).all()
-        
-        return JSONResponse({
-            "success": True,
-            "replacement": {
-                "id": replacement.id,
-                "replacement_date": replacement.replacement_date.strftime("%Y-%m-%d"),
-                "replacement_km": replacement.replacement_km,
-                "vat_rate": replacement.vat_rate,
-                "total_amount": replacement.total_amount,
-                "total_with_vat": replacement.total_with_vat,
-                "notes": replacement.notes or "",
-                "items": [
-                    {
-                        "id": item.id,
-                        "tire_type": item.tire_type,
-                        "tire_manufacturer": item.tire_manufacturer or "",
-                        "tire_brand": item.tire_brand or "",
-                        "position": item.position or "",
-                        "unit": item.unit or "cái",
-                        "quantity": item.quantity,
-                        "unit_price": item.unit_price,
-                        "total_price": item.total_price
-                    }
-                    for item in items
-                ]
-            }
-        })
-    except Exception as e:
-        return JSONResponse({
-            "success": False,
-            "error": f"Lỗi hệ thống: {str(e)}"
-        }, status_code=500)
-
-@app.post("/api/tire-replacement/add")
-async def add_tire_replacement(
-    request: Request,
-    vehicle_id: int = Form(...),
-    replacement_date: str = Form(...),
-    replacement_km: float = Form(...),
-    vat_rate: float = Form(0),
-    notes: str = Form(""),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Thêm mới thay vỏ xe"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
-    try:
-        # Kiểm tra xe có tồn tại và là "Xe Nhà"
-        vehicle = db.query(Vehicle).filter(
-            Vehicle.id == vehicle_id,
-            Vehicle.status == 1,
-            Vehicle.vehicle_type == "Xe Nhà"
-        ).first()
-        
-        if not vehicle:
-            return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
-        
-        # Parse ngày thay vỏ
-        try:
-            replacement_date_obj = datetime.strptime(replacement_date, "%Y-%m-%d").date()
-        except ValueError:
-            return JSONResponse({"success": False, "error": "Ngày thay vỏ không hợp lệ"}, status_code=400)
-        
-        # Lấy dữ liệu items từ form (JSON string)
-        form_data = await request.form()
-        items_json = form_data.get("items", "[]")
-        
-        import json
-        try:
-            items_data = json.loads(items_json)
-        except json.JSONDecodeError as e:
-            return JSONResponse({
-                "success": False,
-                "error": f"Dữ liệu items không hợp lệ: {str(e)}"
-            }, status_code=400)
-        
-        if not items_data or len(items_data) == 0:
-            return JSONResponse({
-                "success": False,
-                "error": "Vui lòng thêm ít nhất một vỏ"
-            }, status_code=400)
-        
-        # Tính tổng tiền
-        total_amount = 0
-        tire_items = []
-        
-        for item_data in items_data:
-            try:
-                tire_type = str(item_data.get("tire_type", "")).strip()
-                if not tire_type:
-                    continue  # Bỏ qua item không có tire_type
-                    
-                quantity = float(item_data.get("quantity", 0))
-                unit_price = float(item_data.get("unit_price", 0))
-                total_price = quantity * unit_price
-                total_amount += total_price
-                
-                tire_items.append({
-                    "tire_type": tire_type,
-                    "tire_manufacturer": str(item_data.get("tire_manufacturer", "")).strip(),
-                    "tire_brand": str(item_data.get("tire_brand", "")).strip(),
-                    "quantity": quantity,
-                    "unit_price": unit_price,
-                    "total_price": total_price
-                })
-            except (ValueError, TypeError) as e:
-                return JSONResponse({
-                    "success": False,
-                    "error": f"Dữ liệu item không hợp lệ: {str(e)}"
-                }, status_code=400)
-        
-        if len(tire_items) == 0:
-            return JSONResponse({
-                "success": False,
-                "error": "Vui lòng thêm ít nhất một vỏ hợp lệ"
-            }, status_code=400)
-        
-        # Tính tổng có VAT
-        vat_amount = total_amount * (vat_rate / 100)
-        total_with_vat = total_amount + vat_amount
-        
-        # Tạo bản ghi thay vỏ
-        replacement = VehicleTireReplacement(
-            vehicle_id=vehicle_id,
-            replacement_date=replacement_date_obj,
-            replacement_km=replacement_km,
-            vat_rate=vat_rate,
-            total_amount=total_amount,
-            total_with_vat=total_with_vat,
-            notes=notes
-        )
-        db.add(replacement)
-        db.flush()  # Để lấy ID
-        
-        # Thu thập tất cả các tire_type duy nhất và tạo chúng trước
-        unique_tire_types = set()
-        for item_data in tire_items:
-            tire_type = item_data.get("tire_type", "").strip()
-            if tire_type and tire_type not in unique_tire_types:
-                unique_tire_types.add(tire_type)
-                # Kiểm tra xem tire_type đã tồn tại chưa
-                tire_type_record = db.query(TireType).filter(
-                    TireType.tire_type == tire_type
-                ).first()
-                if not tire_type_record:
-                    try:
-                        new_tire_type = TireType(
-                            tire_type=tire_type,
-                            expected_lifespan_km=0  # Mặc định 0, có thể cập nhật sau
-                        )
-                        db.add(new_tire_type)
-                        db.flush()  # Flush ngay để kiểm tra unique constraint
-                    except Exception:
-                        # Nếu lỗi (có thể do unique constraint), rollback và kiểm tra lại
-                        db.rollback()
-                        # Kiểm tra lại xem có tồn tại không (có thể đã được tạo bởi transaction khác)
-                        tire_type_record = db.query(TireType).filter(
-                            TireType.tire_type == tire_type
-                        ).first()
-                        if not tire_type_record:
-                            raise  # Nếu vẫn không tồn tại, raise lại lỗi
-        
-        # Flush để đảm bảo tất cả TireType được tạo trước khi tạo items
-        db.flush()
-        
-        # Tạo các items
-        for item_data in tire_items:
-            tire_type = item_data.get("tire_type", "").strip()
-            if not tire_type:
-                continue  # Bỏ qua item không có tire_type
-                
-            item = VehicleTireReplacementItem(
-                replacement_id=replacement.id,
-                tire_type=tire_type,
-                tire_manufacturer=item_data.get("tire_manufacturer", "").strip(),
-                tire_brand=item_data.get("tire_brand", "").strip(),
-                position=None,  # Không sử dụng nữa
-                unit=None,  # Không sử dụng nữa
-                quantity=item_data.get("quantity", 0),
-                unit_price=item_data.get("unit_price", 0),
-                total_price=item_data.get("total_price", 0)
-            )
-            db.add(item)
-        
-        db.commit()
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã thêm thay vỏ thành công"
-        })
-        
-    except Exception as e:
-        db.rollback()
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"Error in add_tire_replacement: {error_trace}")  # Log để debug
-        return JSONResponse({
-            "success": False,
-            "error": f"Lỗi hệ thống: {str(e)}"
-        }, status_code=500)
-
-@app.put("/api/tire-replacement/edit/{replacement_id}")
-async def edit_tire_replacement(
-    replacement_id: int,
-    request: Request,
-    replacement_date: str = Form(...),
-    replacement_km: float = Form(...),
-    vat_rate: float = Form(0),
-    notes: str = Form(""),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Sửa thay vỏ xe"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
-    try:
-        # Kiểm tra thay vỏ có tồn tại
-        replacement = db.query(VehicleTireReplacement).filter(
-            VehicleTireReplacement.id == replacement_id
-        ).first()
-        
-        if not replacement:
-            return JSONResponse({"success": False, "error": "Không tìm thấy bản ghi thay vỏ"}, status_code=404)
-        
-        # Kiểm tra xe có tồn tại và là "Xe Nhà"
-        vehicle = db.query(Vehicle).filter(
-            Vehicle.id == replacement.vehicle_id,
-            Vehicle.status == 1,
-            Vehicle.vehicle_type == "Xe Nhà"
-        ).first()
-        
-        if not vehicle:
-            return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
-        
-        # Parse ngày thay vỏ
-        try:
-            replacement_date_obj = datetime.strptime(replacement_date, "%Y-%m-%d").date()
-        except ValueError:
-            return JSONResponse({"success": False, "error": "Ngày thay vỏ không hợp lệ"}, status_code=400)
-        
-        # Lấy dữ liệu items từ form (JSON string)
-        form_data = await request.form()
-        items_json = form_data.get("items", "[]")
-        
-        import json
-        try:
-            items_data = json.loads(items_json)
-        except json.JSONDecodeError:
-            items_data = []
-        
-        # Tính tổng tiền
-        total_amount = 0
-        tire_items = []
-        
-        for item_data in items_data:
-            quantity = float(item_data.get("quantity", 0))
-            unit_price = float(item_data.get("unit_price", 0))
-            total_price = quantity * unit_price
-            total_amount += total_price
-            
-            tire_items.append({
-                "tire_type": item_data.get("tire_type", ""),
-                "tire_manufacturer": item_data.get("tire_manufacturer", ""),
-                "tire_brand": item_data.get("tire_brand", ""),
-                "quantity": quantity,
-                "unit_price": unit_price,
-                "total_price": total_price
-            })
-        
-        # Tính tổng có VAT
-        vat_amount = total_amount * (vat_rate / 100)
-        total_with_vat = total_amount + vat_amount
-        
-        # Xóa các items cũ
-        db.query(VehicleTireReplacementItem).filter(
-            VehicleTireReplacementItem.replacement_id == replacement_id
-        ).delete()
-        
-        # Cập nhật thay vỏ
-        replacement.replacement_date = replacement_date_obj
-        replacement.replacement_km = replacement_km
-        replacement.vat_rate = vat_rate
-        replacement.total_amount = total_amount
-        replacement.total_with_vat = total_with_vat
-        replacement.notes = notes
-        
-        # Thu thập tất cả các tire_type duy nhất và tạo chúng trước
-        unique_tire_types = set()
-        for item_data in tire_items:
-            tire_type = item_data["tire_type"]
-            if tire_type and tire_type not in unique_tire_types:
-                unique_tire_types.add(tire_type)
-                # Kiểm tra xem tire_type đã tồn tại chưa
-                tire_type_record = db.query(TireType).filter(
-                    TireType.tire_type == tire_type
-                ).first()
-                if not tire_type_record:
-                    new_tire_type = TireType(
-                        tire_type=tire_type,
-                        expected_lifespan_km=0  # Mặc định 0, có thể cập nhật sau
-                    )
-                    db.add(new_tire_type)
-        
-        # Tạo các items mới
-        for item_data in tire_items:
-            item = VehicleTireReplacementItem(
-                replacement_id=replacement.id,
-                tire_type=item_data["tire_type"],
-                tire_manufacturer=item_data["tire_manufacturer"],
-                tire_brand=item_data["tire_brand"],
-                position=None,  # Không sử dụng nữa
-                unit=None,  # Không sử dụng nữa
-                quantity=item_data["quantity"],
-                unit_price=item_data["unit_price"],
-                total_price=item_data["total_price"]
-            )
-            db.add(item)
-        
-        db.commit()
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã cập nhật thay vỏ thành công"
-        })
-        
-    except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "error": f"Lỗi hệ thống: {str(e)}"
-        }, status_code=500)
-
-@app.delete("/api/tire-replacement/delete/{replacement_id}")
-async def delete_tire_replacement(
-    replacement_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Xóa thay vỏ xe"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
-    try:
-        # Kiểm tra thay vỏ có tồn tại
-        replacement = db.query(VehicleTireReplacement).filter(
-            VehicleTireReplacement.id == replacement_id
-        ).first()
-        
-        if not replacement:
-            return JSONResponse({"success": False, "error": "Không tìm thấy bản ghi thay vỏ"}, status_code=404)
-        
-        # Kiểm tra xe có tồn tại và là "Xe Nhà"
-        vehicle = db.query(Vehicle).filter(
-            Vehicle.id == replacement.vehicle_id,
-            Vehicle.status == 1,
-            Vehicle.vehicle_type == "Xe Nhà"
-        ).first()
-        
-        if not vehicle:
-            return JSONResponse({"success": False, "error": "Không tìm thấy xe"}, status_code=404)
-        
-        # Xóa các items (cascade sẽ tự động xóa do relationship)
-        db.query(VehicleTireReplacementItem).filter(
-            VehicleTireReplacementItem.replacement_id == replacement_id
-        ).delete()
-        
-        # Xóa thay vỏ
-        db.delete(replacement)
-        db.commit()
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã xóa thay vỏ thành công"
         })
         
     except Exception as e:
@@ -5822,6 +5178,81 @@ def calculate_trip_salary(result: TimekeepingDetail, db: Session) -> float:
     # Mặc định: trả về 0 nếu không khớp với bất kỳ quy tắc nào
     return 0.0
 
+def get_partner_vehicle_unit_price(license_plate: str, route_type: str, route_code: str, route_name: str) -> float:
+    """
+    Lấy đơn giá theo km cho xe đối tác:
+    - Nội thành: 0 (vì tính theo chuyến cố định)
+    - Xe 37H-076.36: 5,175 đ/km
+    - Xe 37H-083.68: 4,801 đ/km
+    """
+    license_plate = (license_plate or "").strip() if license_plate else ""
+    route_type = (route_type or "").strip() if route_type else ""
+    route_code = (route_code or "").strip() if route_code else ""
+    route_name = (route_name or "").strip() if route_name else ""
+    
+    # Kiểm tra nếu là tuyến Nội thành
+    noi_thanh_lower = "nội thành"
+    if (route_type.lower() == noi_thanh_lower or 
+        route_code.lower() == noi_thanh_lower or 
+        noi_thanh_lower in route_name.lower()):
+        return 0.0  # Nội thành không tính theo km
+    
+    # Xe 37H-076.36: 5,175 đ/km
+    if license_plate == "37H-076.36":
+        return 5175.0
+    
+    # Xe 37H-083.68: 4,801 đ/km
+    if license_plate == "37H-083.68":
+        return 4801.0
+    
+    # Mặc định: 0
+    return 0.0
+
+def calculate_partner_vehicle_payment(result: TimekeepingDetail, db: Session) -> float:
+    """
+    Tính tiền cho xe đối tác dựa trên các quy tắc:
+    
+    1. Tuyến "Nội thành": 204.545 đ / chuyến (cố định, không cộng phí cầu đường)
+    2. Tính theo Km chuyến (ngoài Nội thành):
+       - Xe 37H-076.36: (Km chuyến × 5.175 đ) + Phí cầu đường
+       - Xe 37H-083.68: (Km chuyến × 4.801 đ) + Phí cầu đường
+    
+    Công thức: Thành tiền = đơn giá × km chuyến + Phí cầu đường
+    
+    Ưu tiên: Nếu route_type = "Nội thành" → áp dụng giá cố định
+    Nếu không → áp dụng đơn giá km theo từng xe đối tác + phí cầu đường
+    """
+    # Nếu status là OFF, tiền = 0
+    if result.status and (result.status.strip().upper() == "OFF"):
+        return 0.0
+    
+    route_type = (result.route_type or "").strip() if result.route_type else ""
+    route_code = (result.route_code or "").strip() if result.route_code else ""
+    route_name = (result.route_name or "").strip() if result.route_name else ""
+    license_plate = (result.license_plate or "").strip() if result.license_plate else ""
+    distance_km = result.distance_km or 0
+    bridge_fee = result.bridge_fee or 0  # Phí cầu đường
+    
+    # Trường hợp 1: Tuyến "Nội thành" - giá cố định 204.545 đ / chuyến (không cộng phí cầu đường)
+    # Kiểm tra route_type, route_code hoặc route_name (case-insensitive)
+    noi_thanh_lower = "nội thành"
+    if (route_type.lower() == noi_thanh_lower or 
+        route_code.lower() == noi_thanh_lower or 
+        noi_thanh_lower in route_name.lower()):
+        return 204545.0
+    
+    # Trường hợp 2: Tính theo Km (ngoài Nội thành) + Phí cầu đường
+    # Xe 37H-076.36: (Km chuyến × 5.175 đ) + Phí cầu đường
+    if license_plate == "37H-076.36":
+        return (distance_km * 5175.0) + bridge_fee
+    
+    # Xe 37H-083.68: (Km chuyến × 4.801 đ) + Phí cầu đường
+    if license_plate == "37H-083.68":
+        return (distance_km * 4801.0) + bridge_fee
+    
+    # Mặc định: nếu không khớp với bất kỳ quy tắc nào, trả về 0
+    return 0.0
+
 @app.get("/salary-calculation-v2", response_class=HTMLResponse)
 async def salary_calculation_v2_page(
     request: Request,
@@ -5829,9 +5260,11 @@ async def salary_calculation_v2_page(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     driver_name: Optional[str] = None,
+    license_plate: Optional[str] = None,
+    tab: Optional[str] = None,
     current_user = Depends(get_current_user)
 ):
-    """Trang Bảng Tính Lương Ver 2.0"""
+    """Trang Bảng Tính Lương Ver 2.0 - Hỗ trợ 2 tab: Tính lương lái xe và Tính tiền xe đối tác"""
     # Kiểm tra quyền truy cập
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
@@ -5839,10 +5272,20 @@ async def salary_calculation_v2_page(
     if not check_page_access(current_user["role"], "/salary-calculation-v2"):
         return RedirectResponse(url="/login", status_code=303)
     
-    # Lấy danh sách lái xe từ TimekeepingDetail
+    # Xác định tab hiện tại (mặc định là "driver" - tính lương lái xe)
+    current_tab = tab if tab in ["driver", "partner"] else "driver"
+    
+    # Lấy danh sách lái xe từ TimekeepingDetail (chỉ cho tab driver)
     drivers_query = db.query(TimekeepingDetail.driver_name).distinct()
     drivers_list = [row[0] for row in drivers_query.filter(TimekeepingDetail.driver_name.isnot(None), TimekeepingDetail.driver_name != "").all()]
     drivers_list.sort()
+    
+    # Lấy danh sách xe đối tác (chỉ cho tab partner)
+    partner_vehicles = db.query(Vehicle).filter(
+        Vehicle.status == 1,
+        Vehicle.vehicle_type == "Xe Đối tác"
+    ).all()
+    partner_vehicle_plates = [v.license_plate for v in partner_vehicles]
     
     # Tính giá trị mặc định: từ ngày đầu tháng đến ngày cuối tháng hiện tại
     today = date.today()
@@ -5858,6 +5301,7 @@ async def salary_calculation_v2_page(
     
     results = []
     selected_driver = None
+    selected_license_plate = None
     
     # Thực hiện tìm kiếm với giá trị mặc định hoặc giá trị được cung cấp
     if from_date and to_date:
@@ -5876,28 +5320,54 @@ async def salary_calculation_v2_page(
                     TimekeepingDetail.date <= to_date_obj
                 )
                 
-                # Filter theo lái xe nếu có
-                if driver_name and driver_name.strip():
-                    query = query.filter(TimekeepingDetail.driver_name == driver_name.strip())
-                    selected_driver = driver_name.strip()
+                # Nếu là tab "partner" (xe đối tác), chỉ lấy các chuyến của xe đối tác
+                if current_tab == "partner":
+                    # Lọc chỉ các chuyến có biển số xe là xe đối tác
+                    if partner_vehicle_plates:
+                        query = query.filter(TimekeepingDetail.license_plate.in_(partner_vehicle_plates))
+                    else:
+                        # Nếu không có xe đối tác nào, trả về kết quả rỗng
+                        query = query.filter(TimekeepingDetail.license_plate == None)
+                    
+                    # Filter theo biển số xe nếu có (chỉ cho tab partner)
+                    if license_plate and license_plate.strip():
+                        query = query.filter(TimekeepingDetail.license_plate == license_plate.strip())
+                        selected_license_plate = license_plate.strip()
+                else:
+                    # Tab "driver": Filter theo lái xe nếu có
+                    if driver_name and driver_name.strip():
+                        query = query.filter(TimekeepingDetail.driver_name == driver_name.strip())
+                        selected_driver = driver_name.strip()
                 
                 # Lấy tất cả kết quả trước khi sắp xếp
                 all_results = query.all()
                 
-                # Tách ra 2 nhóm: tuyến thường và tuyến "Tăng Cường"
+                # Nếu là tab partner, lọc thêm để đảm bảo chỉ lấy xe đối tác
+                if current_tab == "partner":
+                    filtered_results = []
+                    for result in all_results:
+                        if result.license_plate and result.license_plate in partner_vehicle_plates:
+                            filtered_results.append(result)
+                    all_results = filtered_results
+                
+                # Tách ra 2 nhóm: tuyến thường và tuyến "Tăng Cường" (chỉ cho tab driver)
                 normal_results = []
                 tang_cuong_results = []
                 
                 for result in all_results:
-                    # Kiểm tra xem có phải tuyến "Tăng Cường" không
-                    is_tang_cuong = (
-                        (result.route_code and result.route_code.strip() == "Tăng Cường") or
-                        (result.route_name and "Tăng Cường" in result.route_name)
-                    )
-                    
-                    if is_tang_cuong:
-                        tang_cuong_results.append(result)
+                    if current_tab == "driver":
+                        # Kiểm tra xem có phải tuyến "Tăng Cường" không
+                        is_tang_cuong = (
+                            (result.route_code and result.route_code.strip() == "Tăng Cường") or
+                            (result.route_name and "Tăng Cường" in result.route_name)
+                        )
+                        
+                        if is_tang_cuong:
+                            tang_cuong_results.append(result)
+                        else:
+                            normal_results.append(result)
                     else:
+                        # Tab partner: không cần tách Tăng Cường
                         normal_results.append(result)
                 
                 # Sắp xếp mỗi nhóm:
@@ -5912,24 +5382,44 @@ async def salary_calculation_v2_page(
                 # Sắp xếp nhóm tuyến thường
                 normal_results_sorted = sorted(normal_results, key=sort_key)
                 
-                # Sắp xếp nhóm tuyến "Tăng Cường"
-                tang_cuong_results_sorted = sorted(tang_cuong_results, key=sort_key)
+                # Sắp xếp nhóm tuyến "Tăng Cường" (chỉ cho tab driver)
+                if current_tab == "driver":
+                    tang_cuong_results_sorted = sorted(tang_cuong_results, key=sort_key)
+                    # Ghép lại: tuyến thường trước, tuyến "Tăng Cường" sau
+                    results = normal_results_sorted + tang_cuong_results_sorted
+                else:
+                    results = normal_results_sorted
                 
-                # Ghép lại: tuyến thường trước, tuyến "Tăng Cường" sau
-                results = normal_results_sorted + tang_cuong_results_sorted
-                
-                # Tính lương chuyến cho từng kết quả
-                results_with_salary = []
+                # Tính lương/tiền chuyến cho từng kết quả
+                results_with_payment = []
                 for result in results:
-                    trip_salary = calculate_trip_salary(result, db)
-                    # Tạo dictionary với thông tin result và lương đã tính
+                    if current_tab == "partner":
+                        # Tính tiền xe đối tác
+                        payment = calculate_partner_vehicle_payment(result, db)
+                        # Lấy đơn giá và phí cầu đường để hiển thị
+                        unit_price = get_partner_vehicle_unit_price(
+                            result.license_plate,
+                            result.route_type,
+                            result.route_code,
+                            result.route_name
+                        )
+                        bridge_fee = result.bridge_fee or 0
+                    else:
+                        # Tính lương lái xe
+                        payment = calculate_trip_salary(result, db)
+                        unit_price = 0
+                        bridge_fee = 0
+                    
+                    # Tạo dictionary với thông tin result và tiền/lương đã tính
                     result_dict = {
                         "result": result,
-                        "trip_salary": trip_salary
+                        "trip_salary": payment,
+                        "unit_price": unit_price,
+                        "bridge_fee": bridge_fee
                     }
-                    results_with_salary.append(result_dict)
+                    results_with_payment.append(result_dict)
                 
-                results = results_with_salary
+                results = results_with_payment
         except ValueError:
             # Nếu format ngày không đúng, bỏ qua
             pass
@@ -5941,7 +5431,10 @@ async def salary_calculation_v2_page(
         "from_date": from_date,
         "to_date": to_date,
         "selected_driver": selected_driver,
-        "results": results
+        "selected_license_plate": selected_license_plate,
+        "results": results,
+        "current_tab": current_tab,
+        "partner_vehicles": partner_vehicle_plates
     })
 
 @app.get("/salary-calculation-v2/export-excel")
@@ -5950,15 +5443,27 @@ async def export_salary_calculation_v2_excel(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     driver_name: Optional[str] = None,
+    license_plate: Optional[str] = None,
+    tab: Optional[str] = None,
     current_user = Depends(get_current_user)
 ):
-    """Xuất Excel bảng tính lương Ver 2.0"""
+    """Xuất Excel bảng tính lương Ver 2.0 - Hỗ trợ cả tab driver và partner"""
     # Kiểm tra quyền truy cập
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
     
     if not check_page_access(current_user["role"], "/salary-calculation-v2"):
         return RedirectResponse(url="/login", status_code=303)
+    
+    # Xác định tab hiện tại (mặc định là "driver")
+    current_tab = tab if tab in ["driver", "partner"] else "driver"
+    
+    # Lấy danh sách xe đối tác (chỉ cho tab partner)
+    partner_vehicles = db.query(Vehicle).filter(
+        Vehicle.status == 1,
+        Vehicle.vehicle_type == "Xe Đối tác"
+    ).all()
+    partner_vehicle_plates = [v.license_plate for v in partner_vehicles]
     
     results = []
     
@@ -5979,27 +5484,52 @@ async def export_salary_calculation_v2_excel(
                     TimekeepingDetail.date <= to_date_obj
                 )
                 
-                # Filter theo lái xe nếu có
-                if driver_name and driver_name.strip():
-                    query = query.filter(TimekeepingDetail.driver_name == driver_name.strip())
+                # Nếu là tab "partner" (xe đối tác), chỉ lấy các chuyến của xe đối tác
+                if current_tab == "partner":
+                    # Lọc chỉ các chuyến có biển số xe là xe đối tác
+                    if partner_vehicle_plates:
+                        query = query.filter(TimekeepingDetail.license_plate.in_(partner_vehicle_plates))
+                    else:
+                        # Nếu không có xe đối tác nào, trả về kết quả rỗng
+                        query = query.filter(TimekeepingDetail.license_plate == None)
+                    
+                    # Filter theo biển số xe nếu có (chỉ cho tab partner)
+                    if license_plate and license_plate.strip():
+                        query = query.filter(TimekeepingDetail.license_plate == license_plate.strip())
+                else:
+                    # Tab "driver": Filter theo lái xe nếu có
+                    if driver_name and driver_name.strip():
+                        query = query.filter(TimekeepingDetail.driver_name == driver_name.strip())
                 
                 # Lấy tất cả kết quả trước khi sắp xếp
                 all_results = query.all()
                 
-                # Tách ra 2 nhóm: tuyến thường và tuyến "Tăng Cường"
+                # Nếu là tab partner, lọc thêm để đảm bảo chỉ lấy xe đối tác
+                if current_tab == "partner":
+                    filtered_results = []
+                    for result in all_results:
+                        if result.license_plate and result.license_plate in partner_vehicle_plates:
+                            filtered_results.append(result)
+                    all_results = filtered_results
+                
+                # Tách ra 2 nhóm: tuyến thường và tuyến "Tăng Cường" (chỉ cho tab driver)
                 normal_results = []
                 tang_cuong_results = []
                 
                 for result in all_results:
-                    # Kiểm tra xem có phải tuyến "Tăng Cường" không
-                    is_tang_cuong = (
-                        (result.route_code and result.route_code.strip() == "Tăng Cường") or
-                        (result.route_name and "Tăng Cường" in result.route_name)
-                    )
-                    
-                    if is_tang_cuong:
-                        tang_cuong_results.append(result)
+                    if current_tab == "driver":
+                        # Kiểm tra xem có phải tuyến "Tăng Cường" không
+                        is_tang_cuong = (
+                            (result.route_code and result.route_code.strip() == "Tăng Cường") or
+                            (result.route_name and "Tăng Cường" in result.route_name)
+                        )
+                        
+                        if is_tang_cuong:
+                            tang_cuong_results.append(result)
+                        else:
+                            normal_results.append(result)
                     else:
+                        # Tab partner: không cần tách Tăng Cường
                         normal_results.append(result)
                 
                 # Sắp xếp mỗi nhóm:
@@ -6014,23 +5544,43 @@ async def export_salary_calculation_v2_excel(
                 # Sắp xếp nhóm tuyến thường
                 normal_results_sorted = sorted(normal_results, key=sort_key)
                 
-                # Sắp xếp nhóm tuyến "Tăng Cường"
-                tang_cuong_results_sorted = sorted(tang_cuong_results, key=sort_key)
+                # Sắp xếp nhóm tuyến "Tăng Cường" (chỉ cho tab driver)
+                if current_tab == "driver":
+                    tang_cuong_results_sorted = sorted(tang_cuong_results, key=sort_key)
+                    # Ghép lại: tuyến thường trước, tuyến "Tăng Cường" sau
+                    results = normal_results_sorted + tang_cuong_results_sorted
+                else:
+                    results = normal_results_sorted
                 
-                # Ghép lại: tuyến thường trước, tuyến "Tăng Cường" sau
-                results = normal_results_sorted + tang_cuong_results_sorted
-                
-                # Tính lương chuyến cho từng kết quả
-                results_with_salary = []
+                # Tính lương/tiền chuyến cho từng kết quả
+                results_with_payment = []
                 for result in results:
-                    trip_salary = calculate_trip_salary(result, db)
+                    if current_tab == "partner":
+                        # Tính tiền xe đối tác
+                        payment = calculate_partner_vehicle_payment(result, db)
+                        # Lấy đơn giá và phí cầu đường để hiển thị
+                        unit_price = get_partner_vehicle_unit_price(
+                            result.license_plate,
+                            result.route_type,
+                            result.route_code,
+                            result.route_name
+                        )
+                        bridge_fee = result.bridge_fee or 0
+                    else:
+                        # Tính lương lái xe
+                        payment = calculate_trip_salary(result, db)
+                        unit_price = 0
+                        bridge_fee = 0
+                    
                     result_dict = {
                         "result": result,
-                        "trip_salary": trip_salary
+                        "trip_salary": payment,
+                        "unit_price": unit_price,
+                        "bridge_fee": bridge_fee
                     }
-                    results_with_salary.append(result_dict)
+                    results_with_payment.append(result_dict)
                 
-                results = results_with_salary
+                results = results_with_payment
         except ValueError:
             # Nếu format ngày không đúng, trả về file rỗng
             pass
@@ -6045,9 +5595,15 @@ async def export_salary_calculation_v2_excel(
     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
     header_alignment = Alignment(horizontal="center", vertical="center")
     
+    # Xác định số cột cho merge cells
+    merge_range = 'A1:M1' if current_tab == "partner" else 'A1:K1'
+    
     # Tiêu đề báo cáo
-    ws.merge_cells('A1:J1')
-    ws['A1'] = "BẢNG TÍNH LƯƠNG VER 2.0"
+    ws.merge_cells(merge_range)
+    if current_tab == "partner":
+        ws['A1'] = "BẢNG TÍNH TIỀN XE ĐỐI TÁC VER 2.0"
+    else:
+        ws['A1'] = "BẢNG TÍNH LƯƠNG VER 2.0"
     ws['A1'].font = Font(bold=True, size=16)
     ws['A1'].alignment = Alignment(horizontal="center")
     
@@ -6062,27 +5618,40 @@ async def export_salary_calculation_v2_excel(
     else:
         date_text = "Khoảng thời gian: Chưa xác định"
     
-    ws.merge_cells('A2:J2')
+    ws.merge_cells(merge_range.replace('1', '2'))
     ws['A2'] = date_text
     ws['A2'].alignment = Alignment(horizontal="center")
     ws['A2'].font = Font(italic=True)
     
-    # Thông tin lái xe nếu có filter
-    if driver_name and driver_name.strip():
-        driver_text = f"Lái xe: {driver_name.strip()}"
+    # Thông tin filter
+    if current_tab == "partner":
+        if license_plate and license_plate.strip():
+            filter_text = f"Biển số xe: {license_plate.strip()}"
+        else:
+            filter_text = "Xe đối tác: Tất cả"
     else:
-        driver_text = "Lái xe: Tất cả"
+        if driver_name and driver_name.strip():
+            filter_text = f"Lái xe: {driver_name.strip()}"
+        else:
+            filter_text = "Lái xe: Tất cả"
     
-    ws.merge_cells('A3:J3')
-    ws['A3'] = driver_text
+    ws.merge_cells(merge_range.replace('1', '3'))
+    ws['A3'] = filter_text
     ws['A3'].alignment = Alignment(horizontal="center")
     ws['A3'].font = Font(italic=True)
     
     # Header bảng
-    headers = [
-        "STT", "Ngày", "Biển số xe", "Mã tuyến", 
-        "Km chuyến", "Trạng thái", "Lái xe", "Mã chuyến", "Lương chuyến", "Ghi chú"
-    ]
+    payment_column_name = "Tiền chuyến" if current_tab == "partner" else "Lương chuyến"
+    if current_tab == "partner":
+        headers = [
+            "STT", "Ngày", "Biển số xe", "Mã tuyến", "Lộ trình",
+            "Km chuyến", "Đơn giá", "Phí cầu đường", "Trạng thái", "Lái xe", "Mã chuyến", payment_column_name, "Ghi chú"
+        ]
+    else:
+        headers = [
+            "STT", "Ngày", "Biển số xe", "Mã tuyến", "Lộ trình",
+            "Km chuyến", "Trạng thái", "Lái xe", "Mã chuyến", payment_column_name, "Ghi chú"
+        ]
     
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=5, column=col, value=header)
@@ -6111,42 +5680,78 @@ async def export_salary_calculation_v2_excel(
         # Mã tuyến
         ws.cell(row=idx, column=4, value=result.route_code or '')
         
+        # Lộ trình
+        ws.cell(row=idx, column=5, value=result.itinerary or '')
+        
         # Km chuyến
         if result.distance_km:
-            ws.cell(row=idx, column=5, value=result.distance_km)
-            ws.cell(row=idx, column=5).number_format = '#,##0.0'
+            ws.cell(row=idx, column=6, value=result.distance_km)
+            ws.cell(row=idx, column=6).number_format = '#,##0.0'
         else:
-            ws.cell(row=idx, column=5, value=0)
-            ws.cell(row=idx, column=5).number_format = '#,##0.0'
+            ws.cell(row=idx, column=6, value=0)
+            ws.cell(row=idx, column=6).number_format = '#,##0.0'
         
-        # Trạng thái
-        status_value = result.status or 'ON'
-        if status_value == 'OFF' or status_value == 'Off':
-            ws.cell(row=idx, column=6, value='OFF')
+        # Đơn giá và Phí cầu đường (chỉ cho tab partner)
+        if current_tab == "partner":
+            # Đơn giá
+            unit_price = item.get("unit_price", 0) if isinstance(item, dict) else 0
+            ws.cell(row=idx, column=7, value=unit_price)
+            ws.cell(row=idx, column=7).number_format = '#,##0'
+            
+            # Phí cầu đường
+            bridge_fee = item.get("bridge_fee", 0) if isinstance(item, dict) else 0
+            ws.cell(row=idx, column=8, value=bridge_fee)
+            ws.cell(row=idx, column=8).number_format = '#,##0'
+            
+            # Trạng thái (cột 9)
+            status_value = result.status or 'ON'
+            if status_value == 'OFF' or status_value == 'Off':
+                ws.cell(row=idx, column=9, value='OFF')
+            else:
+                ws.cell(row=idx, column=9, value='ON')
+            
+            # Lái xe (cột 10)
+            ws.cell(row=idx, column=10, value=result.driver_name or '')
+            
+            # Mã chuyến (cột 11)
+            ws.cell(row=idx, column=11, value=result.trip_code or '')
+            
+            # Tiền chuyến (cột 12)
+            if result.status == 'OFF' or result.status == 'Off':
+                ws.cell(row=idx, column=12, value=0)
+            else:
+                ws.cell(row=idx, column=12, value=trip_salary)
+            ws.cell(row=idx, column=12).number_format = '#,##0'
+            
+            # Ghi chú (cột 13)
+            ws.cell(row=idx, column=13, value=result.notes or '')
         else:
-            ws.cell(row=idx, column=6, value='ON')
-        
-        # Lái xe
-        ws.cell(row=idx, column=7, value=result.driver_name or '')
-        
-        # Mã chuyến
-        ws.cell(row=idx, column=8, value=result.trip_code or '')
-        
-        # Lương chuyến
-        if result.status == 'OFF' or result.status == 'Off':
-            ws.cell(row=idx, column=9, value=0)
-        else:
-            # Sử dụng lương đã tính
-            ws.cell(row=idx, column=9, value=trip_salary)
-        # Định dạng số cho cột lương chuyến
-        ws.cell(row=idx, column=9).number_format = '#,##0'
-        
-        # Ghi chú
-        ws.cell(row=idx, column=10, value=result.notes or '')
+            # Trạng thái (cột 7)
+            status_value = result.status or 'ON'
+            if status_value == 'OFF' or status_value == 'Off':
+                ws.cell(row=idx, column=7, value='OFF')
+            else:
+                ws.cell(row=idx, column=7, value='ON')
+            
+            # Lái xe (cột 8)
+            ws.cell(row=idx, column=8, value=result.driver_name or '')
+            
+            # Mã chuyến (cột 9)
+            ws.cell(row=idx, column=9, value=result.trip_code or '')
+            
+            # Lương chuyến (cột 10)
+            if result.status == 'OFF' or result.status == 'Off':
+                ws.cell(row=idx, column=10, value=0)
+            else:
+                ws.cell(row=idx, column=10, value=trip_salary)
+            ws.cell(row=idx, column=10).number_format = '#,##0'
+            
+            # Ghi chú (cột 11)
+            ws.cell(row=idx, column=11, value=result.notes or '')
     
     # Định dạng số cho cột lương chuyến (nếu cần format lại)
     for row in range(6, 6 + len(results)):
-        cell = ws.cell(row=row, column=9)
+        cell = ws.cell(row=row, column=10)
         if cell.value == 0 or cell.value == '':
             pass
         else:
@@ -6162,25 +5767,26 @@ async def export_salary_calculation_v2_excel(
         ws.cell(row=total_row, column=2, value="").font = Font(bold=True)
         ws.cell(row=total_row, column=3, value="").font = Font(bold=True)
         ws.cell(row=total_row, column=4, value="").font = Font(bold=True)
+        ws.cell(row=total_row, column=5, value="").font = Font(bold=True)
         
         # Tổng km
         total_km = sum(
             (item.get("result") if isinstance(item, dict) else item).distance_km or 0 
             for item in results
         )
-        ws.cell(row=total_row, column=5, value=total_km).font = Font(bold=True)
-        ws.cell(row=total_row, column=5).number_format = '#,##0.0'
+        ws.cell(row=total_row, column=6, value=total_km).font = Font(bold=True)
+        ws.cell(row=total_row, column=6).number_format = '#,##0.0'
         
-        ws.cell(row=total_row, column=6, value="").font = Font(bold=True)
         ws.cell(row=total_row, column=7, value="").font = Font(bold=True)
         ws.cell(row=total_row, column=8, value="").font = Font(bold=True)
+        ws.cell(row=total_row, column=9, value="").font = Font(bold=True)
         # Tổng lương chuyến
-        ws.cell(row=total_row, column=9, value=total_salary).font = Font(bold=True)
-        ws.cell(row=total_row, column=9).number_format = '#,##0'
-        ws.cell(row=total_row, column=10, value="").font = Font(bold=True)
+        ws.cell(row=total_row, column=10, value=total_salary).font = Font(bold=True)
+        ws.cell(row=total_row, column=10).number_format = '#,##0'
+        ws.cell(row=total_row, column=11, value="").font = Font(bold=True)
     
     # Điều chỉnh độ rộng cột
-    column_widths = [8, 12, 15, 15, 12, 12, 20, 15, 18, 30]
+    column_widths = [8, 12, 15, 15, 20, 12, 12, 20, 15, 18, 30]
     for col, width in enumerate(column_widths, 1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
