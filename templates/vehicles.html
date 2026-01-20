@@ -6,6 +6,18 @@
 <div class="page-wrapper">
 <h2 class="page-title">🚚 Quản lý xe</h2>
 
+<!-- Tab Navigation -->
+<div class="sheet-tabs" style="margin-bottom: 25px;">
+    <button type="button" class="sheet-tab active" onclick="switchTab('danh-sach-xe')" id="tab-danh-sach-xe">
+        📋 Danh sách xe
+    </button>
+    <button type="button" class="sheet-tab" onclick="switchTab('khoan-xe')" id="tab-khoan-xe">
+        🚗 Khoán xe
+    </button>
+</div>
+
+<!-- Tab: Danh sách xe -->
+<div id="content-danh-sach-xe" class="tab-content active">
 <!-- Button thêm mới xe -->
 <div style="margin-bottom: 20px;">
     <button type="button" class="btn btn-success" onclick="openAddVehicleModal()">
@@ -119,6 +131,71 @@
     <p>Hãy thêm xe đầu tiên bằng nút "Thêm mới xe" bên trên</p>
 </div>
 {% endif %}
+</div>
+
+<!-- Tab: Khoán xe -->
+<div id="content-khoan-xe" class="tab-content" style="display: none;">
+<!-- Button tạo khoán xe -->
+<div style="margin-bottom: 20px;">
+    <button type="button" class="btn btn-success" onclick="openAddAssignmentModal()">
+        ➕ Tạo bảng danh sách khoán xe
+    </button>
+</div>
+
+<h3 class="section-title">📋 Danh sách khoán xe</h3>
+<div style="overflow-x: auto;">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>STT</th>
+                <th>Biển số xe</th>
+                <th>Lái xe</th>
+                <th>Ngày nhận xe</th>
+                <th>Ngày kết thúc</th>
+                <th>Trạng thái</th>
+                <th>Thao tác</th>
+            </tr>
+        </thead>
+        <tbody id="assignmentsTableBody">
+            {% for assignment in assignments %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td><strong>{{ assignment.vehicle.license_plate if assignment.vehicle else 'N/A' }}</strong></td>
+                <td>{{ assignment.employee.name if assignment.employee else 'N/A' }}</td>
+                <td>{{ assignment.assignment_date.strftime('%d/%m/%Y') if assignment.assignment_date else 'N/A' }}</td>
+                <td>
+                    {% if assignment.end_date %}
+                        {{ assignment.end_date.strftime('%d/%m/%Y') }}
+                    {% else %}
+                        <span style="color: #27ae60; font-weight: bold;">Đang khoán</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if assignment.end_date %}
+                        <span style="padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; background: #95a5a6; color: white;">
+                            Đã kết thúc
+                        </span>
+                    {% else %}
+                        <span style="padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; background: #27ae60; color: white;">
+                            Đang khoán
+                        </span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if not assignment.end_date %}
+                        <button type="button" class="btn btn-sm btn-warning" onclick="openTransferModal({{ assignment.id }}, {{ assignment.vehicle_id }}, '{{ assignment.vehicle.license_plate if assignment.vehicle else 'N/A' }}', {{ assignment.employee_id }}, '{{ assignment.employee.name if assignment.employee else 'N/A' }}', '{{ assignment.assignment_date.strftime('%Y-%m-%d') if assignment.assignment_date else '' }}')" style="padding: 5px 10px; font-size: 12px;">
+                            🔄 Thu hồi / Chuyển xe
+                        </button>
+                    {% else %}
+                        <span style="color: #95a5a6;">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+</div>
 
 <!-- Modal thêm xe mới -->
 <div id="addVehicleModal" class="modal" style="display: none;">
@@ -183,6 +260,114 @@
     </div>
 </div>
 
+<!-- Modal tạo khoán xe -->
+<div id="addAssignmentModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>Danh sách xe nhà</h3>
+            <span class="close" onclick="closeAddAssignmentModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="addAssignmentForm">
+                <div class="form-group">
+                    <label for="assignment_vehicle_id">Xe *</label>
+                    <select id="assignment_vehicle_id" name="vehicle_id" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="">-- Chọn xe --</option>
+                        {% for vehicle in available_vehicles %}
+                        <option value="{{ vehicle.id }}">{{ vehicle.license_plate }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="assignment_employee_id">Lái xe *</label>
+                    <select id="assignment_employee_id" name="employee_id" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="">-- Chọn lái xe --</option>
+                        {% for driver in drivers %}
+                        <option value="{{ driver.id }}">{{ driver.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="assignment_date">Ngày nhận xe *</label>
+                    <input type="date" id="assignment_date" name="assignment_date" required>
+                </div>
+                <div class="modal-footer" style="margin-top: 20px; text-align: right;">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddAssignmentModal()">Hủy bỏ</button>
+                    <button type="submit" class="btn btn-success">Lưu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Thu hồi / Chuyển trách nhiệm xe -->
+<div id="transferModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h3>🔄 Thu hồi / Chuyển trách nhiệm xe</h3>
+            <span class="close" onclick="closeTransferModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="transferForm">
+                <input type="hidden" id="transfer_assignment_id" name="assignment_id">
+                <input type="hidden" id="transfer_vehicle_id" name="vehicle_id">
+                <input type="hidden" id="transfer_old_employee_id" name="old_employee_id">
+                
+                <div class="form-group">
+                    <label for="transfer_vehicle_display">1️⃣ Xe</label>
+                    <input type="text" id="transfer_vehicle_display" readonly style="background-color: #f5f5f5; cursor: not-allowed;">
+                </div>
+                
+                <div class="form-group">
+                    <label for="transfer_old_driver_display">2️⃣ Lái xe hiện tại</label>
+                    <input type="text" id="transfer_old_driver_display" readonly style="background-color: #f5f5f5; cursor: not-allowed;">
+                    <small style="color: #27ae60; display: block; margin-top: 5px;">Trạng thái: Đang làm việc</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="transfer_reason">3️⃣ Lý do thu hồi 🚨 <span style="color: red;">*</span></label>
+                    <select id="transfer_reason" name="transfer_reason" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px;">
+                        <option value="">-- Chọn lý do --</option>
+                        <option value="Thiếu trách nhiệm quản lý xe">Thiếu trách nhiệm quản lý xe</option>
+                        <option value="Hao dầu bất thường">Hao dầu bất thường</option>
+                        <option value="Không bảo dưỡng đúng quy định">Không bảo dưỡng đúng quy định</option>
+                        <option value="Vi phạm nội quy">Vi phạm nội quy</option>
+                        <option value="Khác">Khác</option>
+                    </select>
+                    <textarea id="transfer_reason_other" name="transfer_reason_other" placeholder="Nhập mô tả chi tiết (bắt buộc nếu chọn 'Khác')" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-height: 80px; display: none;"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="transfer_end_date">4️⃣ Ngày kết thúc trách nhiệm của lái xe cũ</label>
+                    <input type="date" id="transfer_end_date" name="end_date" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="transfer_new_employee_id">5️⃣ Lái xe mới</label>
+                    <select id="transfer_new_employee_id" name="new_employee_id" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="">-- Chọn lái xe --</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="transfer_new_assignment_date">6️⃣ Ngày nhận xe của lái xe mới</label>
+                    <input type="date" id="transfer_new_assignment_date" name="new_assignment_date" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="transfer_internal_note">7️⃣ Ghi chú nội bộ (không bắt buộc)</label>
+                    <textarea id="transfer_internal_note" name="internal_note" placeholder="Ghi chú dùng cho quản lý" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-height: 80px;"></textarea>
+                </div>
+                
+                <div class="modal-footer" style="margin-top: 20px; text-align: right;">
+                    <button type="button" class="btn btn-secondary" onclick="closeTransferModal()">Huỷ</button>
+                    <button type="submit" class="btn btn-success">Xác nhận thu hồi & chuyển xe</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal xem sổ đăng kiểm -->
 <div id="inspectionModal" class="modal" style="display: none;">
     <div class="modal-content" style="max-width: 800px;">
@@ -213,20 +398,45 @@
     </div>
 </div>
 
-<!-- Lưu ý - Đã ẩn -->
-<div style="display: none; margin-top: 30px; padding: 20px; background: rgba(241, 196, 15, 0.1); border-radius: 10px; border-left: 4px solid #f1c40f;">
-    <h4 style="color: #5dade2; margin-bottom: 10px;">💡 Lưu ý:</h4>
-    <ul style="color: #2c3e50; line-height: 1.6;">
-        <li>Biển số xe phải là duy nhất trong hệ thống</li>
-        <li>Loại xe và tải trọng là bắt buộc</li>
-        <li><strong>Xe Nhà:</strong> Xe thuộc sở hữu của công ty</li>
-        <li><strong>Xe Đối tác:</strong> Xe thuê hoặc hợp tác từ bên ngoài</li>
-        <li>Ngày hết hạn đăng kiểm sẽ hiển thị cảnh báo nếu sắp hết hạn (dưới 30 ngày)</li>
-        <li>Có thể upload nhiều ảnh sổ đăng kiểm</li>
-    </ul>
-</div>
-
 <style>
+.sheet-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.sheet-tab {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background-color: #e9ecef;
+    color: #495057;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.sheet-tab:hover {
+    background-color: #dee2e6;
+}
+
+.sheet-tab.active {
+    background-color: #3498db;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
 .modal {
     position: fixed;
     z-index: 1000;
@@ -313,6 +523,238 @@
 </style>
 
 <script>
+// Tab switching
+function switchTab(tabName) {
+    // Hide all tab contents
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+        content.style.display = 'none';
+    });
+    
+    // Remove active class from all tab buttons
+    document.querySelectorAll('.sheet-tab').forEach(button => {
+        button.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    const selectedContent = document.getElementById('content-' + tabName);
+    if (selectedContent) {
+        selectedContent.classList.add('active');
+        selectedContent.style.display = 'block';
+    }
+    
+    // Add active class to selected tab button
+    const selectedButton = document.getElementById('tab-' + tabName);
+    if (selectedButton) {
+        selectedButton.classList.add('active');
+    }
+    
+    // Load assignments if switching to khoan-xe tab
+    if (tabName === 'khoan-xe') {
+        loadAssignments();
+    }
+}
+
+// Load assignments data
+async function loadAssignments() {
+    try {
+        const response = await fetch('/api/vehicles/assignments');
+        const data = await response.json();
+        
+        if (data.success) {
+            const tbody = document.getElementById('assignmentsTableBody');
+            tbody.innerHTML = '';
+            
+            if (data.data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #7f8c8d;">Chưa có khoán xe nào</td></tr>';
+            } else {
+                data.data.forEach((assignment, index) => {
+                    const row = document.createElement('tr');
+                    
+                    // Create cells
+                    const cell1 = document.createElement('td');
+                    cell1.textContent = index + 1;
+                    
+                    const cell2 = document.createElement('td');
+                    const strong = document.createElement('strong');
+                    strong.textContent = assignment.vehicle_license_plate || 'N/A';
+                    cell2.appendChild(strong);
+                    
+                    const cell3 = document.createElement('td');
+                    cell3.textContent = assignment.employee_name || 'N/A';
+                    
+                    const cell4 = document.createElement('td');
+                    cell4.textContent = assignment.assignment_date || 'N/A';
+                    
+                    const cell5 = document.createElement('td');
+                    if (assignment.end_date) {
+                        cell5.textContent = assignment.end_date;
+                    } else {
+                        const span = document.createElement('span');
+                        span.style.color = '#27ae60';
+                        span.style.fontWeight = 'bold';
+                        span.textContent = 'Đang khoán';
+                        cell5.appendChild(span);
+                    }
+                    
+                    const cell6 = document.createElement('td');
+                    const statusSpan = document.createElement('span');
+                    statusSpan.style.padding = '3px 8px';
+                    statusSpan.style.borderRadius = '12px';
+                    statusSpan.style.fontSize = '11px';
+                    statusSpan.style.fontWeight = 'bold';
+                    if (assignment.is_active) {
+                        statusSpan.style.background = '#27ae60';
+                        statusSpan.style.color = 'white';
+                        statusSpan.textContent = 'Đang khoán';
+                    } else {
+                        statusSpan.style.background = '#95a5a6';
+                        statusSpan.style.color = 'white';
+                        statusSpan.textContent = 'Đã kết thúc';
+                    }
+                    cell6.appendChild(statusSpan);
+                    
+                    const cell7 = document.createElement('td');
+                    if (assignment.is_active) {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'btn btn-sm btn-warning';
+                        button.style.padding = '5px 10px';
+                        button.style.fontSize = '12px';
+                        button.textContent = '🔄 Thu hồi / Chuyển xe';
+                        button.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            console.log('Button clicked for assignment:', assignment);
+                            if (typeof openTransferModal === 'function') {
+                                openTransferModal(
+                                    assignment.id,
+                                    assignment.vehicle_id,
+                                    assignment.vehicle_license_plate || 'N/A',
+                                    assignment.employee_id,
+                                    assignment.employee_name || 'N/A',
+                                    assignment.assignment_date_raw || ''
+                                );
+                            } else {
+                                console.error('openTransferModal is not a function');
+                                alert('Có lỗi: Hàm openTransferModal không tồn tại');
+                            }
+                        });
+                        cell7.appendChild(button);
+                    } else {
+                        const span = document.createElement('span');
+                        span.style.color = '#95a5a6';
+                        span.textContent = '-';
+                        cell7.appendChild(span);
+                    }
+                    
+                    // Append all cells to row
+                    row.appendChild(cell1);
+                    row.appendChild(cell2);
+                    row.appendChild(cell3);
+                    row.appendChild(cell4);
+                    row.appendChild(cell5);
+                    row.appendChild(cell6);
+                    row.appendChild(cell7);
+                    
+                    tbody.appendChild(row);
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Lỗi khi tải danh sách khoán xe:', error);
+    }
+}
+
+// Load available vehicles and drivers for assignment modal
+async function loadAssignmentData() {
+    try {
+        const [vehiclesRes, driversRes] = await Promise.all([
+            fetch('/api/vehicles/available'),
+            fetch('/api/employees/drivers')
+        ]);
+        
+        const vehiclesData = await vehiclesRes.json();
+        const driversData = await driversRes.json();
+        
+        // Update vehicle dropdown
+        const vehicleSelect = document.getElementById('assignment_vehicle_id');
+        vehicleSelect.innerHTML = '<option value="">-- Chọn xe --</option>';
+        if (vehiclesData.success && vehiclesData.data) {
+            vehiclesData.data.forEach(vehicle => {
+                const option = document.createElement('option');
+                option.value = vehicle.id;
+                option.textContent = vehicle.license_plate;
+                vehicleSelect.appendChild(option);
+            });
+        }
+        
+        // Update driver dropdown
+        const driverSelect = document.getElementById('assignment_employee_id');
+        driverSelect.innerHTML = '<option value="">-- Chọn lái xe --</option>';
+        if (driversData.success && driversData.data) {
+            driversData.data.forEach(driver => {
+                const option = document.createElement('option');
+                option.value = driver.id;
+                option.textContent = driver.name;
+                driverSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Lỗi khi tải dữ liệu:', error);
+    }
+}
+
+// Assignment modal functions
+function openAddAssignmentModal() {
+    loadAssignmentData();
+    // Set default date to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('assignment_date').value = today;
+    document.getElementById('addAssignmentModal').style.display = 'block';
+}
+
+function closeAddAssignmentModal() {
+    document.getElementById('addAssignmentModal').style.display = 'none';
+    document.getElementById('addAssignmentForm').reset();
+}
+
+// Handle assignment form submission
+document.getElementById('addAssignmentForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const data = {
+        vehicle_id: parseInt(formData.get('vehicle_id')),
+        employee_id: parseInt(formData.get('employee_id')),
+        assignment_date: formData.get('assignment_date')
+    };
+    
+    try {
+        const response = await fetch('/vehicles/assignments/add', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(result.message || 'Tạo khoán xe thành công');
+            closeAddAssignmentModal();
+            loadAssignments();
+            // Reload page to update available vehicles
+            location.reload();
+        } else {
+            alert('Lỗi: ' + (result.message || 'Không thể tạo khoán xe'));
+        }
+    } catch (error) {
+        console.error('Lỗi khi tạo khoán xe:', error);
+        alert('Có lỗi xảy ra khi tạo khoán xe');
+    }
+});
+
 function openAddVehicleModal() {
     document.getElementById('addVehicleModal').style.display = 'block';
 }
@@ -341,6 +783,195 @@ function closePhuHieuModal() {
     document.getElementById('phuHieuModal').style.display = 'none';
     document.getElementById('phuHieuContent').innerHTML = '';
 }
+
+// Transfer modal functions
+async function openTransferModal(assignmentId, vehicleId, vehiclePlate, oldEmployeeId, oldEmployeeName, assignmentDate) {
+    console.log('openTransferModal called with:', {assignmentId, vehicleId, vehiclePlate, oldEmployeeId, oldEmployeeName, assignmentDate});
+    
+    try {
+        // Set hidden fields
+        document.getElementById('transfer_assignment_id').value = assignmentId;
+        document.getElementById('transfer_vehicle_id').value = vehicleId;
+        document.getElementById('transfer_old_employee_id').value = oldEmployeeId;
+    
+    // Set readonly fields
+    document.getElementById('transfer_vehicle_display').value = vehiclePlate;
+    document.getElementById('transfer_old_driver_display').value = oldEmployeeName;
+    
+    // Set default dates
+    const today = new Date().toISOString().split('T')[0];
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    
+    document.getElementById('transfer_end_date').value = today;
+    document.getElementById('transfer_new_assignment_date').value = tomorrowStr;
+    
+    // Load available drivers (excluding the old driver)
+    try {
+        const response = await fetch('/api/employees/drivers');
+        const data = await response.json();
+        
+        const driverSelect = document.getElementById('transfer_new_employee_id');
+        driverSelect.innerHTML = '<option value="">-- Chọn lái xe --</option>';
+        
+        if (data.success && data.data) {
+            data.data.forEach(driver => {
+                // Exclude the old driver (convert both to numbers for comparison)
+                if (parseInt(driver.id) !== parseInt(oldEmployeeId)) {
+                    const option = document.createElement('option');
+                    option.value = driver.id;
+                    option.textContent = driver.name;
+                    driverSelect.appendChild(option);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Lỗi khi tải danh sách lái xe:', error);
+    }
+    
+        // Reset form
+        document.getElementById('transfer_reason').value = '';
+        document.getElementById('transfer_reason_other').value = '';
+        document.getElementById('transfer_reason_other').style.display = 'none';
+        document.getElementById('transfer_internal_note').value = '';
+        
+        // Show modal
+        const modal = document.getElementById('transferModal');
+        if (modal) {
+            modal.style.display = 'block';
+            console.log('Modal displayed');
+        } else {
+            console.error('transferModal element not found');
+        }
+    } catch (error) {
+        console.error('Error in openTransferModal:', error);
+        alert('Có lỗi xảy ra khi mở form thu hồi/chuyển xe: ' + error.message);
+    }
+}
+
+function closeTransferModal() {
+    document.getElementById('transferModal').style.display = 'none';
+    document.getElementById('transferForm').reset();
+}
+
+// Handle transfer reason dropdown change
+document.getElementById('transfer_reason').addEventListener('change', function() {
+    const otherTextarea = document.getElementById('transfer_reason_other');
+    if (this.value === 'Khác') {
+        otherTextarea.style.display = 'block';
+        otherTextarea.required = true;
+    } else {
+        otherTextarea.style.display = 'none';
+        otherTextarea.required = false;
+        otherTextarea.value = '';
+    }
+});
+
+// Handle date validation
+document.getElementById('transfer_end_date').addEventListener('change', function() {
+    const endDate = new Date(this.value);
+    const newAssignmentDate = document.getElementById('transfer_new_assignment_date');
+    const newDate = new Date(newAssignmentDate.value);
+    
+    if (newDate < endDate) {
+        // If new assignment date is before end date, set it to the day after end date
+        const nextDay = new Date(endDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        newAssignmentDate.value = nextDay.toISOString().split('T')[0];
+    }
+    
+    // Set min date for new assignment date
+    const minDate = new Date(endDate);
+    minDate.setDate(minDate.getDate() + 1);
+    newAssignmentDate.min = minDate.toISOString().split('T')[0];
+});
+
+document.getElementById('transfer_new_assignment_date').addEventListener('change', function() {
+    const newDate = new Date(this.value);
+    const endDate = document.getElementById('transfer_end_date');
+    const endDateValue = new Date(endDate.value);
+    
+    if (newDate <= endDateValue) {
+        alert('Ngày nhận xe của lái xe mới phải lớn hơn ngày kết thúc trách nhiệm của lái xe cũ');
+        // Set to the day after end date
+        const nextDay = new Date(endDateValue);
+        nextDay.setDate(nextDay.getDate() + 1);
+        this.value = nextDay.toISOString().split('T')[0];
+    }
+    
+    // Set max date for end date
+    const maxDate = new Date(newDate);
+    maxDate.setDate(maxDate.getDate() - 1);
+    endDate.max = maxDate.toISOString().split('T')[0];
+});
+
+// Handle transfer form submission
+document.getElementById('transferForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const transferReason = document.getElementById('transfer_reason').value;
+    const transferReasonOther = document.getElementById('transfer_reason_other').value;
+    
+    // Validate transfer reason
+    if (!transferReason) {
+        alert('Vui lòng chọn lý do thu hồi');
+        return;
+    }
+    
+    if (transferReason === 'Khác' && !transferReasonOther.trim()) {
+        alert('Vui lòng nhập mô tả chi tiết khi chọn lý do "Khác"');
+        return;
+    }
+    
+    // Build final transfer reason
+    const finalReason = transferReason === 'Khác' ? transferReasonOther : transferReason;
+    
+    const data = {
+        assignment_id: parseInt(document.getElementById('transfer_assignment_id').value),
+        vehicle_id: parseInt(document.getElementById('transfer_vehicle_id').value),
+        old_employee_id: parseInt(document.getElementById('transfer_old_employee_id').value),
+        transfer_reason: finalReason,
+        end_date: document.getElementById('transfer_end_date').value,
+        new_employee_id: parseInt(document.getElementById('transfer_new_employee_id').value),
+        new_assignment_date: document.getElementById('transfer_new_assignment_date').value,
+        internal_note: document.getElementById('transfer_internal_note').value
+    };
+    
+    // Validate dates
+    const endDate = new Date(data.end_date);
+    const newAssignmentDate = new Date(data.new_assignment_date);
+    
+    if (newAssignmentDate <= endDate) {
+        alert('Ngày nhận xe của lái xe mới phải lớn hơn ngày kết thúc trách nhiệm của lái xe cũ');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/vehicles/assignments/transfer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(result.message || 'Thu hồi và chuyển xe thành công');
+            closeTransferModal();
+            loadAssignments();
+            // Reload page to update data
+            location.reload();
+        } else {
+            alert('Lỗi: ' + (result.message || 'Không thể thực hiện thu hồi và chuyển xe'));
+        }
+    } catch (error) {
+        console.error('Lỗi khi thu hồi và chuyển xe:', error);
+        alert('Có lỗi xảy ra khi thu hồi và chuyển xe');
+    }
+});
 
 // Xem trước ảnh khi chọn file
 document.getElementById('inspection_documents').addEventListener('change', function(e) {
@@ -481,7 +1112,6 @@ async function deleteDocument(vehicleId, filename) {
         
         if (data.success) {
             alert('Xóa file thành công');
-            // Reload trang để cập nhật danh sách
             location.reload();
         } else {
             alert('Lỗi: ' + data.error);
@@ -507,7 +1137,6 @@ async function deletePhuHieuDocument(vehicleId, filename) {
         
         if (data.success) {
             alert('Xóa file thành công');
-            // Reload trang để cập nhật danh sách
             location.reload();
         } else {
             alert('Lỗi: ' + data.error);
@@ -523,6 +1152,8 @@ window.onclick = function(event) {
     const addModal = document.getElementById('addVehicleModal');
     const inspectionModal = document.getElementById('inspectionModal');
     const phuHieuModal = document.getElementById('phuHieuModal');
+    const assignmentModal = document.getElementById('addAssignmentModal');
+    const transferModal = document.getElementById('transferModal');
     
     if (event.target === addModal) {
         closeAddVehicleModal();
@@ -532,6 +1163,12 @@ window.onclick = function(event) {
     }
     if (event.target === phuHieuModal) {
         closePhuHieuModal();
+    }
+    if (event.target === assignmentModal) {
+        closeAddAssignmentModal();
+    }
+    if (event.target === transferModal) {
+        closeTransferModal();
     }
 }
 </script>

@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, Date, DateTime, ForeignKey, and_, extract, func
+from sqlalchemy import create_engine, Column, Integer, String, Float, Date, DateTime, ForeignKey, and_, or_, extract, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, date, timedelta
@@ -127,6 +127,24 @@ class Vehicle(Base):
     # Relationships
     routes = relationship("Route", back_populates="vehicle")
     maintenances = relationship("VehicleMaintenance", back_populates="vehicle")
+    assignments = relationship("VehicleAssignment", back_populates="vehicle")
+
+class VehicleAssignment(Base):
+    """Bảng quản lý khoán xe cho tài xế"""
+    __tablename__ = "vehicle_assignments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    assignment_date = Column(Date, nullable=False)  # Ngày nhận xe
+    end_date = Column(Date, nullable=True)  # Ngày kết thúc khoán (null nếu đang khoán)
+    transfer_reason = Column(String, nullable=True)  # Lý do thu hồi/chuyển xe
+    internal_note = Column(String, nullable=True)  # Ghi chú nội bộ
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    vehicle = relationship("Vehicle", back_populates="assignments")
+    employee = relationship("Employee")
 
 class VehicleMaintenance(Base):
     """Bảng quản lý bảo dưỡng xe"""
@@ -504,10 +522,100 @@ def get_vehicle_fuel_consumption(db: Session, license_plate: str) -> Optional[fl
     
     return None
 
+def check_vehicle_assignment_for_trip(db: Session, license_plate: str, driver_name: str, trip_date: date) -> Tuple[bool, Optional[str]]:
+    """
+    Kiểm tra xem xe có đang được khoán cho đúng lái xe tại thời điểm chạy chuyến không.
+    
+    Điều kiện để tính tiền dầu:
+    1. Có biển số xe
+    2. Có lái xe
+    3. Xe đang ở trạng thái Khoán xe = Active
+    4. Lái xe của chuyến = Lái xe đang khoán xe
+    5. Ngày chuyến nằm trong khoảng khoán (assignment_date <= trip_date < end_date hoặc end_date is null)
+    
+    Args:
+        db: Database session
+        license_plate: Biển số xe
+        driver_name: Tên lái xe
+        trip_date: Ngày chạy chuyến
+    
+    Returns:
+        Tuple[bool, Optional[str]]: 
+        - (True, None) nếu đúng khoán
+        - (False, reason) nếu không đúng khoán (reason là lý do)
+    """
+    # Kiểm tra điều kiện cơ bản
+    if not license_plate or not license_plate.strip():
+        return (False, "Không có biển số xe")
+    
+    if not driver_name or not driver_name.strip():
+        return (False, "Không có lái xe")
+    
+    if not trip_date:
+        return (False, "Không có ngày chạy chuyến")
+    
+    # Lấy thông tin xe
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.license_plate == license_plate.strip(),
+        Vehicle.status == 1
+    ).first()
+    
+    if not vehicle:
+        return (False, "Xe không tồn tại hoặc đã bị vô hiệu hóa")
+    
+    # Xe đối tác không tính tiền dầu
+    if vehicle.vehicle_type == "Xe Đối tác":
+        return (False, "Xe đối tác")
+    
+    # Lấy thông tin lái xe
+    employee = db.query(Employee).filter(
+        Employee.name == driver_name.strip(),
+        Employee.status == 1
+    ).first()
+    
+    if not employee:
+        return (False, "Lái xe không tồn tại trong hệ thống")
+    
+    # Kiểm tra khoán xe tại ngày chạy chuyến
+    # Tìm assignment hợp lệ: assignment_date <= trip_date < end_date (hoặc end_date is null)
+    assignment = db.query(VehicleAssignment).join(Vehicle).filter(
+        Vehicle.license_plate == license_plate.strip(),
+        VehicleAssignment.employee_id == employee.id,
+        VehicleAssignment.assignment_date <= trip_date,
+        or_(
+            VehicleAssignment.end_date.is_(None),
+            VehicleAssignment.end_date > trip_date
+        )
+    ).first()
+    
+    if not assignment:
+        # Kiểm tra xem có assignment nào cho xe này không (để biết lý do)
+        any_assignment = db.query(VehicleAssignment).join(Vehicle).filter(
+            Vehicle.license_plate == license_plate.strip()
+        ).first()
+        
+        if not any_assignment:
+            return (False, "Xe chưa được khoán cho ai")
+        else:
+            # Xe đã được khoán nhưng không phải cho lái xe này hoặc không đúng thời điểm
+            return (False, "Xe không khoán cho lái xe này tại thời điểm chạy chuyến")
+    
+    # Tất cả điều kiện đều thỏa mãn
+    return (True, None)
+
 # Helper function để tính dầu khoán (DK) và tiền dầu
 def calculate_fuel_quota(result: TimekeepingDetail, db: Session) -> dict:
     """
     Tính số lít dầu khoán (DK) và tiền dầu cho một chuyến.
+    
+    QUY ĐỊNH: Tiền dầu CHỈ ĐƯỢC TÍNH khi:
+    - Có biển số xe
+    - Có lái xe
+    - Xe đang ở trạng thái Khoán xe = Active
+    - Lái xe của chuyến = Lái xe đang khoán xe
+    - Ngày chuyến nằm trong khoảng khoán
+    
+    Nếu không đúng → Tiền dầu = 0
     
     Trả về dictionary với các key:
     - dk_liters: Số lít dầu khoán (float, tối đa 2 chữ số thập phân)
@@ -515,6 +623,8 @@ def calculate_fuel_quota(result: TimekeepingDetail, db: Session) -> dict:
     - fuel_price: Đơn giá dầu (int, None nếu không có)
     - fuel_consumption: Định mức nhiên liệu (float, None nếu không có)
     - warning: Thông báo cảnh báo (string, None nếu không có)
+    - assignment_status: Trạng thái khoán xe ("valid", "invalid", "no_assignment", "partner_vehicle")
+    - assignment_reason: Lý do không tính tiền dầu (string, None nếu tính được)
     """
     # Khởi tạo kết quả
     result_dict = {
@@ -522,7 +632,9 @@ def calculate_fuel_quota(result: TimekeepingDetail, db: Session) -> dict:
         "fuel_cost": 0,
         "fuel_price": None,
         "fuel_consumption": None,
-        "warning": None
+        "warning": None,
+        "assignment_status": None,
+        "assignment_reason": None
     }
     
     # Kiểm tra nếu status là OFF, không tính
@@ -532,10 +644,27 @@ def calculate_fuel_quota(result: TimekeepingDetail, db: Session) -> dict:
     # Lấy thông tin cơ bản
     trip_date = result.date
     license_plate = result.license_plate
+    driver_name = result.driver_name
     distance_km = result.distance_km or 0
     
     if not trip_date or not license_plate or distance_km <= 0:
         return result_dict
+    
+    # 🔍 BƯỚC 1: Kiểm tra điều kiện khoán xe (BẮT BUỘC)
+    is_valid_assignment, assignment_reason = check_vehicle_assignment_for_trip(
+        db, license_plate, driver_name, trip_date
+    )
+    
+    if not is_valid_assignment:
+        # Không đúng khoán → Tiền dầu = 0
+        result_dict["assignment_status"] = "invalid" if assignment_reason else "no_assignment"
+        result_dict["assignment_reason"] = assignment_reason
+        # Vẫn tính DK và các thông tin khác để hiển thị, nhưng fuel_cost = 0
+        # (Có thể bỏ qua phần tính toán nếu muốn tối ưu)
+        return result_dict
+    
+    # Đánh dấu là khoán hợp lệ
+    result_dict["assignment_status"] = "valid"
     
     # 1. Lấy định mức nhiên liệu của xe
     fuel_consumption = get_vehicle_fuel_consumption(db, license_plate)
@@ -562,7 +691,7 @@ def calculate_fuel_quota(result: TimekeepingDetail, db: Session) -> dict:
     dk_liters = round(dk_liters, 2)
     result_dict["dk_liters"] = dk_liters
     
-    # 4. Tính tiền dầu
+    # 4. Tính tiền dầu (CHỈ TÍNH KHI ĐÚNG KHOÁN)
     # Tiền dầu = DK × Đơn giá dầu
     fuel_cost = dk_liters * fuel_price
     # Làm tròn theo quy tắc toán học (số nguyên)
@@ -617,6 +746,43 @@ try:
     migrate_maintenance_items()
 except Exception as e:
     print(f"Migration error for vehicle_maintenance_items (may be expected if table doesn't exist yet): {e}")
+
+# Migration: Thêm các cột mới vào bảng vehicle_assignments nếu chưa có
+def migrate_vehicle_assignments():
+    """Thêm các cột transfer_reason và internal_note vào bảng vehicle_assignments nếu chưa có"""
+    from sqlalchemy import inspect, text
+    
+    try:
+        inspector = inspect(engine)
+        # Kiểm tra xem bảng có tồn tại không
+        if 'vehicle_assignments' not in inspector.get_table_names():
+            print("Table vehicle_assignments does not exist yet, will be created by create_all")
+            return
+        
+        existing_columns = [col['name'] for col in inspector.get_columns('vehicle_assignments')]
+        
+        new_columns = {
+            'transfer_reason': 'VARCHAR',
+            'internal_note': 'VARCHAR'
+        }
+        
+        with engine.connect() as conn:
+            for col_name, col_type in new_columns.items():
+                if col_name not in existing_columns:
+                    try:
+                        conn.execute(text(f"ALTER TABLE vehicle_assignments ADD COLUMN {col_name} {col_type}"))
+                        conn.commit()
+                        print(f"Added column {col_name} to vehicle_assignments")
+                    except Exception as e:
+                        print(f"Error adding column {col_name}: {e}")
+                        conn.rollback()
+    except Exception as e:
+        print(f"Migration error for vehicle_assignments: {e}")
+
+try:
+    migrate_vehicle_assignments()
+except Exception as e:
+    print(f"Migration error for vehicle_assignments (may be expected if table doesn't exist yet): {e}")
 
 # Migration: Thêm cột social_insurance_salary vào bảng employees nếu chưa có
 def migrate_employee_social_insurance_salary():
@@ -1224,11 +1390,37 @@ async def vehicles_page(request: Request, db: Session = Depends(get_db), current
         return RedirectResponse(url="/daily-new", status_code=303)
     vehicles = db.query(Vehicle).filter(Vehicle.status == 1).all()
     today = date.today()
+    
+    # Lấy danh sách khoán xe với thông tin xe và lái xe
+    assignments = db.query(VehicleAssignment).order_by(VehicleAssignment.assignment_date.desc()).all()
+    
+    # Lấy danh sách lái xe đang làm việc để hiển thị trong dropdown
+    drivers = db.query(Employee).filter(
+        Employee.position == "Lái xe",
+        Employee.employee_status == "Đang làm việc",
+        Employee.status == 1
+    ).order_by(Employee.name).all()
+    
+    # Lấy danh sách xe nhà chưa được khoán hoặc đã kết thúc khoán
+    xe_nha = [v for v in vehicles if v.vehicle_type == "Xe Nhà"]
+    available_vehicles = []
+    for vehicle in xe_nha:
+        # Kiểm tra xem xe có đang được khoán không
+        active_assignment = db.query(VehicleAssignment).filter(
+            VehicleAssignment.vehicle_id == vehicle.id,
+            VehicleAssignment.end_date.is_(None)
+        ).first()
+        if not active_assignment:
+            available_vehicles.append(vehicle)
+    
     return templates.TemplateResponse("vehicles.html", {
         "request": request,
         "current_user": current_user,
         "vehicles": vehicles,
-        "today": today
+        "today": today,
+        "assignments": assignments,
+        "drivers": drivers,
+        "available_vehicles": available_vehicles
     })
 
 @app.post("/vehicles/add")
@@ -1721,6 +1913,297 @@ async def delete_vehicle_phu_hieu_document(
             status_code=500,
             content={"success": False, "error": f"Lỗi hệ thống: {str(e)}"}
         )
+
+# ===== VEHICLE ASSIGNMENT ROUTES =====
+
+@app.post("/vehicles/assignments/add")
+async def add_vehicle_assignment(
+    vehicle_id: int = Form(...),
+    employee_id: int = Form(...),
+    assignment_date: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Tạo khoán xe mới cho lái xe"""
+    try:
+        # Validate vehicle
+        vehicle = db.query(Vehicle).filter(
+            Vehicle.id == vehicle_id,
+            Vehicle.status == 1,
+            Vehicle.vehicle_type == "Xe Nhà"
+        ).first()
+        if not vehicle:
+            return JSONResponse({
+                "success": False,
+                "message": "Xe không tồn tại hoặc không phải xe nhà"
+            }, status_code=400)
+        
+        # Validate employee
+        employee = db.query(Employee).filter(
+            Employee.id == employee_id,
+            Employee.position == "Lái xe",
+            Employee.employee_status == "Đang làm việc",
+            Employee.status == 1
+        ).first()
+        if not employee:
+            return JSONResponse({
+                "success": False,
+                "message": "Lái xe không tồn tại hoặc không hợp lệ"
+            }, status_code=400)
+        
+        # Parse date
+        try:
+            assignment_date_obj = datetime.strptime(assignment_date, "%Y-%m-%d").date()
+        except ValueError:
+            return JSONResponse({
+                "success": False,
+                "message": "Ngày nhận xe không hợp lệ"
+            }, status_code=400)
+        
+        # Kiểm tra xem xe có đang được khoán không
+        active_assignment = db.query(VehicleAssignment).filter(
+            VehicleAssignment.vehicle_id == vehicle_id,
+            VehicleAssignment.end_date.is_(None)
+        ).first()
+        
+        if active_assignment:
+            # Kết thúc khoán cũ
+            active_assignment.end_date = assignment_date_obj - timedelta(days=1)
+            db.add(active_assignment)
+        
+        # Tạo khoán mới
+        new_assignment = VehicleAssignment(
+            vehicle_id=vehicle_id,
+            employee_id=employee_id,
+            assignment_date=assignment_date_obj
+        )
+        db.add(new_assignment)
+        db.commit()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Tạo khoán xe thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi tạo khoán xe: {str(e)}"
+        }, status_code=500)
+
+@app.get("/api/vehicles/assignments")
+async def get_vehicle_assignments(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """API lấy danh sách khoán xe"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền truy cập"
+        }, status_code=403)
+    
+    assignments = db.query(VehicleAssignment).order_by(
+        VehicleAssignment.assignment_date.desc()
+    ).all()
+    
+    result = []
+    for assignment in assignments:
+        result.append({
+            "id": assignment.id,
+            "vehicle_id": assignment.vehicle_id,
+            "vehicle_license_plate": assignment.vehicle.license_plate if assignment.vehicle else "",
+            "employee_id": assignment.employee_id,
+            "employee_name": assignment.employee.name if assignment.employee else "",
+            "assignment_date": assignment.assignment_date.strftime("%d/%m/%Y") if assignment.assignment_date else "",
+            "assignment_date_raw": assignment.assignment_date.strftime("%Y-%m-%d") if assignment.assignment_date else "",
+            "end_date": assignment.end_date.strftime("%d/%m/%Y") if assignment.end_date else None,
+            "is_active": assignment.end_date is None
+        })
+    
+    return JSONResponse({
+        "success": True,
+        "data": result
+    })
+
+@app.get("/api/vehicles/available")
+async def get_available_vehicles(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """API lấy danh sách xe nhà chưa được khoán hoặc đã kết thúc khoán"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền truy cập"
+        }, status_code=403)
+    
+    vehicles = db.query(Vehicle).filter(
+        Vehicle.status == 1,
+        Vehicle.vehicle_type == "Xe Nhà"
+    ).all()
+    
+    available = []
+    for vehicle in vehicles:
+        # Kiểm tra xem xe có đang được khoán không
+        active_assignment = db.query(VehicleAssignment).filter(
+            VehicleAssignment.vehicle_id == vehicle.id,
+            VehicleAssignment.end_date.is_(None)
+        ).first()
+        if not active_assignment:
+            available.append({
+                "id": vehicle.id,
+                "license_plate": vehicle.license_plate
+            })
+    
+    return JSONResponse({
+        "success": True,
+        "data": available
+    })
+
+@app.get("/api/employees/drivers")
+async def get_drivers(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """API lấy danh sách lái xe đang làm việc"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền truy cập"
+        }, status_code=403)
+    
+    drivers = db.query(Employee).filter(
+        Employee.position == "Lái xe",
+        Employee.employee_status == "Đang làm việc",
+        Employee.status == 1
+    ).order_by(Employee.name).all()
+    
+    result = []
+    for driver in drivers:
+        result.append({
+            "id": driver.id,
+            "name": driver.name
+        })
+    
+    return JSONResponse({
+        "success": True,
+        "data": result
+    })
+
+@app.post("/vehicles/assignments/transfer")
+async def transfer_vehicle_assignment(
+    assignment_id: int = Form(...),
+    vehicle_id: int = Form(...),
+    old_employee_id: int = Form(...),
+    transfer_reason: str = Form(...),
+    end_date: str = Form(...),
+    new_employee_id: int = Form(...),
+    new_assignment_date: str = Form(...),
+    internal_note: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Thu hồi và chuyển xe từ lái xe cũ sang lái xe mới"""
+    try:
+        # Check permission
+        if current_user is None or current_user["role"] != "Admin":
+            return JSONResponse({
+                "success": False,
+                "message": "Không có quyền thực hiện thao tác này"
+            }, status_code=403)
+        
+        # Validate old assignment
+        old_assignment = db.query(VehicleAssignment).filter(
+            VehicleAssignment.id == assignment_id,
+            VehicleAssignment.vehicle_id == vehicle_id,
+            VehicleAssignment.employee_id == old_employee_id,
+            VehicleAssignment.end_date.is_(None)
+        ).first()
+        
+        if not old_assignment:
+            return JSONResponse({
+                "success": False,
+                "message": "Không tìm thấy khoán xe đang hoạt động"
+            }, status_code=400)
+        
+        # Validate new employee
+        new_employee = db.query(Employee).filter(
+            Employee.id == new_employee_id,
+            Employee.position == "Lái xe",
+            Employee.employee_status == "Đang làm việc",
+            Employee.status == 1
+        ).first()
+        
+        if not new_employee:
+            return JSONResponse({
+                "success": False,
+                "message": "Lái xe mới không tồn tại hoặc không hợp lệ"
+            }, status_code=400)
+        
+        # Validate that new employee is not the old employee
+        if new_employee_id == old_employee_id:
+            return JSONResponse({
+                "success": False,
+                "message": "Lái xe mới không thể là lái xe cũ"
+            }, status_code=400)
+        
+        # Parse dates
+        try:
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+            new_assignment_date_obj = datetime.strptime(new_assignment_date, "%Y-%m-%d").date()
+        except ValueError:
+            return JSONResponse({
+                "success": False,
+                "message": "Ngày tháng không hợp lệ"
+            }, status_code=400)
+        
+        # Validate dates
+        if new_assignment_date_obj <= end_date_obj:
+            return JSONResponse({
+                "success": False,
+                "message": "Ngày nhận xe của lái xe mới phải lớn hơn ngày kết thúc trách nhiệm của lái xe cũ"
+            }, status_code=400)
+        
+        # Check if vehicle is already assigned to someone else on the new assignment date
+        conflicting_assignment = db.query(VehicleAssignment).filter(
+            VehicleAssignment.vehicle_id == vehicle_id,
+            VehicleAssignment.end_date.is_(None)
+        ).first()
+        
+        if conflicting_assignment and conflicting_assignment.id != assignment_id:
+            return JSONResponse({
+                "success": False,
+                "message": "Xe đã được khoán cho lái xe khác"
+            }, status_code=400)
+        
+        # Update old assignment
+        old_assignment.end_date = end_date_obj
+        old_assignment.transfer_reason = transfer_reason
+        old_assignment.internal_note = internal_note if internal_note else None
+        db.add(old_assignment)
+        
+        # Create new assignment
+        new_assignment = VehicleAssignment(
+            vehicle_id=vehicle_id,
+            employee_id=new_employee_id,
+            assignment_date=new_assignment_date_obj
+        )
+        db.add(new_assignment)
+        
+        db.commit()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Thu hồi và chuyển xe thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi thu hồi và chuyển xe: {str(e)}"
+        }, status_code=500)
 
 # ==================== BẢO DƯỠNG XE ====================
 
@@ -6086,8 +6569,20 @@ async def export_salary_calculation_v2_excel(
                 ws.cell(row=idx, column=7, value='')
             
             # Tiền dầu (cột 8)
+            # Chỉ hiển thị tiền dầu nếu đúng khoán và có giá trị > 0
+            assignment_status = fuel_data.get("assignment_status")
             if fuel_data.get("warning"):
                 ws.cell(row=idx, column=8, value='')
+            elif assignment_status == "valid" and fuel_data.get("fuel_cost") is not None and fuel_data.get("fuel_cost", 0) > 0:
+                ws.cell(row=idx, column=8, value=fuel_data.get("fuel_cost", 0))
+                ws.cell(row=idx, column=8).number_format = '#,##0'
+            elif assignment_status == "invalid" or assignment_status == "no_assignment":
+                # Không tính tiền dầu - hiển thị 0 hoặc -- cho xe đối tác
+                if fuel_data.get("assignment_reason") == "Xe đối tác":
+                    ws.cell(row=idx, column=8, value='--')
+                else:
+                    ws.cell(row=idx, column=8, value=0)
+                    ws.cell(row=idx, column=8).number_format = '#,##0'
             elif fuel_data.get("fuel_cost") is not None and fuel_data.get("fuel_cost", 0) > 0:
                 ws.cell(row=idx, column=8, value=fuel_data.get("fuel_cost", 0))
                 ws.cell(row=idx, column=8).number_format = '#,##0'

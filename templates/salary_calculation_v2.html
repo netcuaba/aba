@@ -10,13 +10,13 @@
     </div>
 
     <!-- Tab Navigation -->
-    <div class="card" style="padding: 0; margin-bottom: 25px; border-radius: 10px; overflow: hidden;">
-        <div style="display: flex; border-bottom: 2px solid #e9ecef;">
-            <button type="button" class="tab-button {% if current_tab == 'driver' or not current_tab %}active{% endif %}" 
+    <div style="margin-bottom: 25px;">
+        <div class="sheet-tabs">
+            <button type="button" class="sheet-tab {% if current_tab == 'driver' or not current_tab %}active{% endif %}" 
                     onclick="switchTab('driver')" id="tab-driver">
                 👤 Tính lương lái xe
             </button>
-            <button type="button" class="tab-button {% if current_tab == 'partner' %}active{% endif %}" 
+            <button type="button" class="sheet-tab {% if current_tab == 'partner' %}active{% endif %}" 
                     onclick="switchTab('partner')" id="tab-partner">
                 🚚 Xe đối tác
             </button>
@@ -179,6 +179,10 @@
                                 <span style="color: #d32f2f; font-size: 11px; font-style: italic;" title="{{ fuel_data.warning }}">
                                     ⚠️ {{ fuel_data.warning }}
                                 </span>
+                            {% elif fuel_data.assignment_status == 'invalid' or fuel_data.assignment_status == 'no_assignment' %}
+                                <span style="color: #95a5a6; font-style: italic;" title="{{ fuel_data.assignment_reason or 'Không tính tiền dầu do xe không khoán cho lái xe tại thời điểm chạy' }}">
+                                    --
+                                </span>
                             {% elif fuel_data.dk_liters is defined and fuel_data.dk_liters > 0 %}
                                 <span style="color: #1976d2; font-weight: 600;">{{ "{:,.2f}".format(fuel_data.dk_liters) }} lít</span>
                             {% else %}
@@ -191,6 +195,14 @@
                                 <span style="color: #d32f2f; font-size: 11px; font-style: italic;" title="{{ fuel_data.warning }}">
                                     --
                                 </span>
+                            {% elif fuel_data.assignment_status == 'invalid' or fuel_data.assignment_status == 'no_assignment' %}
+                                {% if fuel_data.assignment_reason == 'Xe đối tác' %}
+                                    <span style="color: #95a5a6; font-style: italic;" title="Xe đối tác không tính tiền dầu">--</span>
+                                {% else %}
+                                    <span style="color: #95a5a6;" title="{{ fuel_data.assignment_reason or 'Không tính tiền dầu do xe không khoán cho lái xe tại thời điểm chạy' }}">
+                                        0 VNĐ
+                                    </span>
+                                {% endif %}
                             {% elif fuel_data.fuel_cost is defined and fuel_data.fuel_cost > 0 %}
                                 <span style="color: #2e7d32; font-weight: 600;">{{ "{:,.0f}".format(fuel_data.fuel_cost) }} VNĐ</span>
                             {% else %}
@@ -272,28 +284,34 @@
         margin-bottom: 15px;
     }
 
-    .tab-button {
-        flex: 1;
-        padding: 15px 30px;
-        background: #f8f9fa;
+    .sheet-tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .sheet-tab {
+        padding: 10px 20px;
         border: none;
-        border-bottom: 3px solid transparent;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
         cursor: pointer;
-        font-size: 16px;
-        font-weight: 600;
-        color: #6c757d;
-        transition: all 0.3s;
-    }
-
-    .tab-button:hover {
-        background: #e9ecef;
+        transition: all 0.3s ease;
+        background-color: #e9ecef;
         color: #495057;
+        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
     }
 
-    .tab-button.active {
-        background: white;
-        color: #1976d2;
-        border-bottom-color: #1976d2;
+    .sheet-tab:hover {
+        background-color: #dee2e6;
+    }
+
+    .sheet-tab.active {
+        background-color: #3498db;
+        color: #ffffff;
+        font-weight: 600;
     }
 </style>
 
@@ -303,7 +321,7 @@ function switchTab(tabName) {
     document.getElementById('tab').value = tabName;
     
     // Cập nhật UI tab buttons
-    document.querySelectorAll('.tab-button').forEach(btn => {
+    document.querySelectorAll('.sheet-tab').forEach(btn => {
         btn.classList.remove('active');
     });
     document.getElementById('tab-' + tabName).classList.add('active');
