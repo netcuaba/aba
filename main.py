@@ -104,6 +104,7 @@ class Employee(Base):
     status = Column(Integer, default=1)  # 1: Active, 0: Inactive
     employee_status = Column(String, default="Đang làm việc")  # Trạng thái: Đang làm việc, Đã nghỉ việc, Nghỉ phép dài hạn
     position = Column(String)  # Chức vụ: Giám đốc, Phó Giám đốc, Lái xe, Nhân viên văn phòng
+    social_insurance_salary = Column(Integer)  # Mức lương tham gia BHXH (số nguyên)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships removed - no longer linked to routes
@@ -215,6 +216,16 @@ class FuelRecord(Base):
     
     # Relationships
     vehicle = relationship("Vehicle", foreign_keys=[license_plate], primaryjoin="FuelRecord.license_plate == Vehicle.license_plate")
+
+class DieselPriceHistory(Base):
+    """Bảng lưu lịch sử giá dầu Diesel 0.05S theo từng thời điểm"""
+    __tablename__ = "diesel_price_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    application_date = Column(Date, nullable=False, unique=True)  # Ngày áp dụng giá (unique để tránh trùng)
+    unit_price = Column(Integer, nullable=False)  # Đơn giá dầu Diesel 0.05S (VNĐ) - số nguyên
+    created_at = Column(DateTime, default=datetime.utcnow)  # Ngày tạo bản ghi
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Ngày cập nhật
 
 class FinanceRecord(Base):
     __tablename__ = "finance_records"
@@ -461,6 +472,105 @@ def get_route_price_by_date(db: Session, route_id: int, target_date: date) -> Op
     
     return route_price
 
+# Helper function để lấy giá dầu theo ngày
+def get_fuel_price_by_date(db: Session, target_date: date) -> Optional[DieselPriceHistory]:
+    """
+    Lấy giá dầu Diesel 0.05S áp dụng cho một ngày cụ thể.
+    Trả về giá dầu có application_date <= target_date và gần nhất với target_date.
+    Nếu không tìm thấy, trả về None.
+    """
+    fuel_price = db.query(DieselPriceHistory).filter(
+        DieselPriceHistory.application_date <= target_date
+    ).order_by(DieselPriceHistory.application_date.desc()).first()
+    
+    return fuel_price
+
+# Helper function để lấy định mức nhiên liệu của xe
+def get_vehicle_fuel_consumption(db: Session, license_plate: str) -> Optional[float]:
+    """
+    Lấy định mức nhiên liệu (lít/100km) của xe theo biển số.
+    Trả về giá trị định mức hoặc None nếu không tìm thấy.
+    """
+    if not license_plate or not license_plate.strip():
+        return None
+    
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.license_plate == license_plate.strip(),
+        Vehicle.status == 1
+    ).first()
+    
+    if vehicle and vehicle.fuel_consumption is not None:
+        return vehicle.fuel_consumption
+    
+    return None
+
+# Helper function để tính dầu khoán (DK) và tiền dầu
+def calculate_fuel_quota(result: TimekeepingDetail, db: Session) -> dict:
+    """
+    Tính số lít dầu khoán (DK) và tiền dầu cho một chuyến.
+    
+    Trả về dictionary với các key:
+    - dk_liters: Số lít dầu khoán (float, tối đa 2 chữ số thập phân)
+    - fuel_cost: Tiền dầu (int, số nguyên)
+    - fuel_price: Đơn giá dầu (int, None nếu không có)
+    - fuel_consumption: Định mức nhiên liệu (float, None nếu không có)
+    - warning: Thông báo cảnh báo (string, None nếu không có)
+    """
+    # Khởi tạo kết quả
+    result_dict = {
+        "dk_liters": 0.0,
+        "fuel_cost": 0,
+        "fuel_price": None,
+        "fuel_consumption": None,
+        "warning": None
+    }
+    
+    # Kiểm tra nếu status là OFF, không tính
+    if result.status and (result.status.strip().upper() == "OFF"):
+        return result_dict
+    
+    # Lấy thông tin cơ bản
+    trip_date = result.date
+    license_plate = result.license_plate
+    distance_km = result.distance_km or 0
+    
+    if not trip_date or not license_plate or distance_km <= 0:
+        return result_dict
+    
+    # 1. Lấy định mức nhiên liệu của xe
+    fuel_consumption = get_vehicle_fuel_consumption(db, license_plate)
+    result_dict["fuel_consumption"] = fuel_consumption
+    
+    if fuel_consumption is None or fuel_consumption <= 0:
+        result_dict["warning"] = "Xe chưa có định mức nhiên liệu"
+        return result_dict
+    
+    # 2. Lấy giá dầu theo ngày chuyến
+    fuel_price_record = get_fuel_price_by_date(db, trip_date)
+    
+    if fuel_price_record is None or fuel_price_record.unit_price is None:
+        result_dict["warning"] = "Chưa có đơn giá dầu cho ngày này"
+        return result_dict
+    
+    fuel_price = fuel_price_record.unit_price
+    result_dict["fuel_price"] = fuel_price
+    
+    # 3. Tính số lít dầu khoán (DK)
+    # DK = Km chuyến × Định mức nhiên liệu / 100
+    dk_liters = (distance_km * fuel_consumption) / 100.0
+    # Làm tròn đến 2 chữ số thập phân
+    dk_liters = round(dk_liters, 2)
+    result_dict["dk_liters"] = dk_liters
+    
+    # 4. Tính tiền dầu
+    # Tiền dầu = DK × Đơn giá dầu
+    fuel_cost = dk_liters * fuel_price
+    # Làm tròn theo quy tắc toán học (số nguyên)
+    fuel_cost = round(fuel_cost)
+    result_dict["fuel_cost"] = int(fuel_cost)
+    
+    return result_dict
+
 # Chạy migration
 try:
     migrate_revenue_records()
@@ -507,6 +617,37 @@ try:
     migrate_maintenance_items()
 except Exception as e:
     print(f"Migration error for vehicle_maintenance_items (may be expected if table doesn't exist yet): {e}")
+
+# Migration: Thêm cột social_insurance_salary vào bảng employees nếu chưa có
+def migrate_employee_social_insurance_salary():
+    """Thêm cột social_insurance_salary vào bảng employees nếu chưa có"""
+    from sqlalchemy import inspect, text
+    
+    try:
+        inspector = inspect(engine)
+        # Kiểm tra xem bảng có tồn tại không
+        if 'employees' not in inspector.get_table_names():
+            print("Table employees does not exist yet, will be created by create_all")
+            return
+        
+        existing_columns = [col['name'] for col in inspector.get_columns('employees')]
+        
+        if 'social_insurance_salary' not in existing_columns:
+            with engine.connect() as conn:
+                try:
+                    conn.execute(text("ALTER TABLE employees ADD COLUMN social_insurance_salary INTEGER"))
+                    conn.commit()
+                    print("Added column social_insurance_salary to employees")
+                except Exception as e:
+                    print(f"Error adding column social_insurance_salary: {e}")
+                    conn.rollback()
+    except Exception as e:
+        print(f"Migration error for employees.social_insurance_salary: {e}")
+
+try:
+    migrate_employee_social_insurance_salary()
+except Exception as e:
+    print(f"Migration error for employees.social_insurance_salary (may be expected if table doesn't exist yet): {e}")
 
 # Dependency để lấy database session
 def get_db():
@@ -812,6 +953,7 @@ async def add_employee(
     license_expiry: str = Form(""),
     employee_status: str = Form("Đang làm việc"),
     position: str = Form(""),
+    social_insurance_salary: str = Form(""),
     documents: list[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -859,6 +1001,17 @@ async def add_employee(
     # Convert documents list to JSON string
     documents_json = json.dumps(documents_paths) if documents_paths else None
     
+    # Parse social_insurance_salary (must be positive integer or None)
+    social_insurance_salary_int = None
+    if social_insurance_salary and social_insurance_salary.strip():
+        try:
+            salary_value = int(social_insurance_salary.strip())
+            if salary_value > 0:
+                social_insurance_salary_int = salary_value
+        except ValueError:
+            # Invalid input, will be None
+            pass
+    
     employee = Employee(
         name=name,
         birth_date=birth_date_obj,
@@ -870,6 +1023,7 @@ async def add_employee(
         license_expiry=license_expiry_date,
         employee_status=employee_status,
         position=position,
+        social_insurance_salary=social_insurance_salary_int,
         documents=documents_json
     )
     db.add(employee)
@@ -904,6 +1058,7 @@ async def edit_employee(
     license_expiry: str = Form(""),
     employee_status: str = Form("Đang làm việc"),
     position: str = Form(""),
+    social_insurance_salary: str = Form(""),
     documents: list[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -966,6 +1121,21 @@ async def edit_employee(
     employee.license_expiry = license_expiry_date
     employee.employee_status = employee_status
     employee.position = position
+    
+    # Update social_insurance_salary only if a new value is provided
+    # Không ghi đè dữ liệu cũ khi người dùng không nhập lại giá trị
+    if social_insurance_salary and social_insurance_salary.strip():
+        try:
+            salary_value = int(social_insurance_salary.strip())
+            if salary_value > 0:
+                employee.social_insurance_salary = salary_value
+            else:
+                # If 0 or negative, set to None
+                employee.social_insurance_salary = None
+        except ValueError:
+            # Invalid input, keep old value (don't update)
+            pass
+    # If empty string, keep the existing value (don't update)
     
     db.commit()
     return RedirectResponse(url="/employees", status_code=303)
@@ -4408,11 +4578,15 @@ async def theo_doi_dau_v2_page(
     # Lấy tất cả bản ghi đổ dầu, sắp xếp theo ngày giảm dần
     fuel_records = db.query(FuelRecord).order_by(FuelRecord.date.desc(), FuelRecord.id.desc()).all()
     
+    # Lấy lịch sử giá dầu, sắp xếp theo ngày áp dụng giảm dần
+    diesel_prices = db.query(DieselPriceHistory).order_by(DieselPriceHistory.application_date.desc()).all()
+    
     return templates.TemplateResponse("theo_doi_dau_v2.html", {
         "request": request,
         "current_user": current_user,
         "fuel_records": fuel_records,
-        "vehicles": sorted_vehicles
+        "vehicles": sorted_vehicles,
+        "diesel_prices": diesel_prices
     })
 
 @app.get("/api/do-dau/detail/{license_plate}")
@@ -4785,6 +4959,159 @@ async def get_fuel_totals(
             "totals": totals_list
         })
     except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ===== API ENDPOINTS CHO QUẢN LÝ GIÁ DẦU =====
+
+@app.get("/api/diesel-price/all")
+async def get_all_diesel_prices(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """API lấy tất cả lịch sử giá dầu"""
+    if current_user is None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    
+    try:
+        prices = db.query(DieselPriceHistory).order_by(DieselPriceHistory.application_date.desc()).all()
+        prices_list = [
+            {
+                "id": p.id,
+                "application_date": p.application_date.strftime("%Y-%m-%d"),
+                "unit_price": p.unit_price,
+                "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S") if p.created_at else "",
+                "updated_at": p.updated_at.strftime("%Y-%m-%d %H:%M:%S") if p.updated_at else ""
+            }
+            for p in prices
+        ]
+        return JSONResponse({
+            "success": True,
+            "prices": prices_list
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/diesel-price/add")
+async def add_diesel_price(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """API thêm giá dầu mới"""
+    if current_user is None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    
+    try:
+        data = await request.json()
+        application_date_str = data.get("application_date")
+        unit_price = data.get("unit_price")
+        
+        if not application_date_str or unit_price is None:
+            return JSONResponse({"error": "Thiếu thông tin bắt buộc"}, status_code=400)
+        
+        # Chuyển đổi ngày
+        try:
+            application_date = datetime.strptime(application_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return JSONResponse({"error": "Định dạng ngày không hợp lệ"}, status_code=400)
+        
+        # Kiểm tra giá phải là số nguyên
+        try:
+            unit_price_int = int(unit_price)
+            if unit_price_int <= 0:
+                return JSONResponse({"error": "Đơn giá phải lớn hơn 0"}, status_code=400)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "Đơn giá phải là số nguyên"}, status_code=400)
+        
+        # Kiểm tra xem đã có giá cho ngày này chưa
+        existing_price = db.query(DieselPriceHistory).filter(
+            DieselPriceHistory.application_date == application_date
+        ).first()
+        
+        if existing_price:
+            return JSONResponse({
+                "error": "Ngày này đã có giá dầu",
+                "existing_id": existing_price.id,
+                "existing_price": existing_price.unit_price
+            }, status_code=400)
+        
+        # Tạo bản ghi mới
+        diesel_price = DieselPriceHistory(
+            application_date=application_date,
+            unit_price=unit_price_int
+        )
+        
+        db.add(diesel_price)
+        db.commit()
+        db.refresh(diesel_price)
+        
+        return JSONResponse({
+            "success": True,
+            "id": diesel_price.id,
+            "message": "Thêm giá dầu thành công"
+        })
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.put("/api/diesel-price/edit/{price_id}")
+async def edit_diesel_price(
+    price_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """API sửa giá dầu"""
+    if current_user is None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    
+    try:
+        diesel_price = db.query(DieselPriceHistory).filter(DieselPriceHistory.id == price_id).first()
+        if not diesel_price:
+            return JSONResponse({"error": "Không tìm thấy bản ghi giá dầu"}, status_code=404)
+        
+        data = await request.json()
+        application_date_str = data.get("application_date")
+        unit_price = data.get("unit_price")
+        
+        # Cập nhật ngày áp dụng nếu có
+        if application_date_str:
+            try:
+                new_application_date = datetime.strptime(application_date_str, "%Y-%m-%d").date()
+                # Kiểm tra xem ngày mới có trùng với bản ghi khác không
+                if new_application_date != diesel_price.application_date:
+                    existing_price = db.query(DieselPriceHistory).filter(
+                        DieselPriceHistory.application_date == new_application_date,
+                        DieselPriceHistory.id != price_id
+                    ).first()
+                    if existing_price:
+                        return JSONResponse({
+                            "error": "Ngày này đã có giá dầu",
+                            "existing_id": existing_price.id
+                        }, status_code=400)
+                diesel_price.application_date = new_application_date
+            except ValueError:
+                return JSONResponse({"error": "Định dạng ngày không hợp lệ"}, status_code=400)
+        
+        # Cập nhật đơn giá nếu có
+        if unit_price is not None:
+            try:
+                unit_price_int = int(unit_price)
+                if unit_price_int <= 0:
+                    return JSONResponse({"error": "Đơn giá phải lớn hơn 0"}, status_code=400)
+                diesel_price.unit_price = unit_price_int
+            except (ValueError, TypeError):
+                return JSONResponse({"error": "Đơn giá phải là số nguyên"}, status_code=400)
+        
+        diesel_price.updated_at = datetime.utcnow()
+        db.commit()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Cập nhật giá dầu thành công"
+        })
+    except Exception as e:
+        db.rollback()
         return JSONResponse({"error": str(e)}, status_code=500)
     
     # Tạo workbook Excel
@@ -5404,18 +5731,29 @@ async def salary_calculation_v2_page(
                             result.route_name
                         )
                         bridge_fee = result.bridge_fee or 0
+                        # Tab partner không tính dầu khoán
+                        fuel_data = {
+                            "dk_liters": 0.0,
+                            "fuel_cost": 0,
+                            "fuel_price": None,
+                            "fuel_consumption": None,
+                            "warning": None
+                        }
                     else:
                         # Tính lương lái xe
                         payment = calculate_trip_salary(result, db)
                         unit_price = 0
                         bridge_fee = 0
+                        # Tính dầu khoán cho tab driver
+                        fuel_data = calculate_fuel_quota(result, db)
                     
                     # Tạo dictionary với thông tin result và tiền/lương đã tính
                     result_dict = {
                         "result": result,
                         "trip_salary": payment,
                         "unit_price": unit_price,
-                        "bridge_fee": bridge_fee
+                        "bridge_fee": bridge_fee,
+                        "fuel_data": fuel_data
                     }
                     results_with_payment.append(result_dict)
                 
@@ -5566,17 +5904,28 @@ async def export_salary_calculation_v2_excel(
                             result.route_name
                         )
                         bridge_fee = result.bridge_fee or 0
+                        # Tab partner không tính dầu khoán
+                        fuel_data = {
+                            "dk_liters": 0.0,
+                            "fuel_cost": 0,
+                            "fuel_price": None,
+                            "fuel_consumption": None,
+                            "warning": None
+                        }
                     else:
                         # Tính lương lái xe
                         payment = calculate_trip_salary(result, db)
                         unit_price = 0
                         bridge_fee = 0
+                        # Tính dầu khoán cho tab driver
+                        fuel_data = calculate_fuel_quota(result, db)
                     
                     result_dict = {
                         "result": result,
                         "trip_salary": payment,
                         "unit_price": unit_price,
-                        "bridge_fee": bridge_fee
+                        "bridge_fee": bridge_fee,
+                        "fuel_data": fuel_data
                     }
                     results_with_payment.append(result_dict)
                 
@@ -5596,7 +5945,7 @@ async def export_salary_calculation_v2_excel(
     header_alignment = Alignment(horizontal="center", vertical="center")
     
     # Xác định số cột cho merge cells
-    merge_range = 'A1:M1' if current_tab == "partner" else 'A1:K1'
+    merge_range = 'A1:M1' if current_tab == "partner" else 'A1:L1'
     
     # Tiêu đề báo cáo
     ws.merge_cells(merge_range)
@@ -5650,7 +5999,7 @@ async def export_salary_calculation_v2_excel(
     else:
         headers = [
             "STT", "Ngày", "Biển số xe", "Mã tuyến", "Lộ trình",
-            "Km chuyến", "Trạng thái", "Lái xe", "Mã chuyến", payment_column_name, "Ghi chú"
+            "Km chuyến", "DK", "Tiền dầu", "Trạng thái", "Lái xe", payment_column_name, "Ghi chú"
         ]
     
     for col, header in enumerate(headers, 1):
@@ -5726,32 +6075,50 @@ async def export_salary_calculation_v2_excel(
             # Ghi chú (cột 13)
             ws.cell(row=idx, column=13, value=result.notes or '')
         else:
-            # Trạng thái (cột 7)
+            # DK (cột 7)
+            fuel_data = item.get("fuel_data", {}) if isinstance(item, dict) else {}
+            if fuel_data.get("warning"):
+                ws.cell(row=idx, column=7, value=fuel_data.get("warning", ""))
+            elif fuel_data.get("dk_liters") is not None and fuel_data.get("dk_liters", 0) > 0:
+                ws.cell(row=idx, column=7, value=fuel_data.get("dk_liters", 0))
+                ws.cell(row=idx, column=7).number_format = '#,##0.00'
+            else:
+                ws.cell(row=idx, column=7, value='')
+            
+            # Tiền dầu (cột 8)
+            if fuel_data.get("warning"):
+                ws.cell(row=idx, column=8, value='')
+            elif fuel_data.get("fuel_cost") is not None and fuel_data.get("fuel_cost", 0) > 0:
+                ws.cell(row=idx, column=8, value=fuel_data.get("fuel_cost", 0))
+                ws.cell(row=idx, column=8).number_format = '#,##0'
+            else:
+                ws.cell(row=idx, column=8, value=0)
+                ws.cell(row=idx, column=8).number_format = '#,##0'
+            
+            # Trạng thái (cột 9)
             status_value = result.status or 'ON'
             if status_value == 'OFF' or status_value == 'Off':
-                ws.cell(row=idx, column=7, value='OFF')
+                ws.cell(row=idx, column=9, value='OFF')
             else:
-                ws.cell(row=idx, column=7, value='ON')
+                ws.cell(row=idx, column=9, value='ON')
             
-            # Lái xe (cột 8)
-            ws.cell(row=idx, column=8, value=result.driver_name or '')
+            # Lái xe (cột 10)
+            ws.cell(row=idx, column=10, value=result.driver_name or '')
             
-            # Mã chuyến (cột 9)
-            ws.cell(row=idx, column=9, value=result.trip_code or '')
-            
-            # Lương chuyến (cột 10)
+            # Lương chuyến (cột 11)
             if result.status == 'OFF' or result.status == 'Off':
-                ws.cell(row=idx, column=10, value=0)
+                ws.cell(row=idx, column=11, value=0)
             else:
-                ws.cell(row=idx, column=10, value=trip_salary)
-            ws.cell(row=idx, column=10).number_format = '#,##0'
+                ws.cell(row=idx, column=11, value=trip_salary)
+            ws.cell(row=idx, column=11).number_format = '#,##0'
             
-            # Ghi chú (cột 11)
-            ws.cell(row=idx, column=11, value=result.notes or '')
+            # Ghi chú (cột 12)
+            ws.cell(row=idx, column=12, value=result.notes or '')
     
     # Định dạng số cho cột lương chuyến (nếu cần format lại)
+    salary_column = 12 if current_tab == "partner" else 11
     for row in range(6, 6 + len(results)):
-        cell = ws.cell(row=row, column=10)
+        cell = ws.cell(row=row, column=salary_column)
         if cell.value == 0 or cell.value == '':
             pass
         else:
@@ -5777,16 +6144,45 @@ async def export_salary_calculation_v2_excel(
         ws.cell(row=total_row, column=6, value=total_km).font = Font(bold=True)
         ws.cell(row=total_row, column=6).number_format = '#,##0.0'
         
-        ws.cell(row=total_row, column=7, value="").font = Font(bold=True)
-        ws.cell(row=total_row, column=8, value="").font = Font(bold=True)
-        ws.cell(row=total_row, column=9, value="").font = Font(bold=True)
-        # Tổng lương chuyến
-        ws.cell(row=total_row, column=10, value=total_salary).font = Font(bold=True)
-        ws.cell(row=total_row, column=10).number_format = '#,##0'
-        ws.cell(row=total_row, column=11, value="").font = Font(bold=True)
+        if current_tab == "partner":
+            ws.cell(row=total_row, column=7, value="").font = Font(bold=True)
+            ws.cell(row=total_row, column=8, value="").font = Font(bold=True)
+            ws.cell(row=total_row, column=9, value="").font = Font(bold=True)
+            ws.cell(row=total_row, column=10, value="").font = Font(bold=True)
+            ws.cell(row=total_row, column=11, value="").font = Font(bold=True)
+            # Tổng tiền chuyến (cột 12)
+            ws.cell(row=total_row, column=12, value=total_salary).font = Font(bold=True)
+            ws.cell(row=total_row, column=12).number_format = '#,##0'
+            ws.cell(row=total_row, column=13, value="").font = Font(bold=True)
+        else:
+            # Tổng DK (cột 7)
+            total_dk = sum(
+                item.get("fuel_data", {}).get("dk_liters", 0) if isinstance(item, dict) else 0
+                for item in results
+            )
+            ws.cell(row=total_row, column=7, value=total_dk).font = Font(bold=True)
+            ws.cell(row=total_row, column=7).number_format = '#,##0.00'
+            
+            # Tổng tiền dầu (cột 8)
+            total_fuel_cost = sum(
+                item.get("fuel_data", {}).get("fuel_cost", 0) if isinstance(item, dict) else 0
+                for item in results
+            )
+            ws.cell(row=total_row, column=8, value=total_fuel_cost).font = Font(bold=True)
+            ws.cell(row=total_row, column=8).number_format = '#,##0'
+            
+            ws.cell(row=total_row, column=9, value="").font = Font(bold=True)
+            ws.cell(row=total_row, column=10, value="").font = Font(bold=True)
+            # Tổng lương chuyến (cột 11)
+            ws.cell(row=total_row, column=11, value=total_salary).font = Font(bold=True)
+            ws.cell(row=total_row, column=11).number_format = '#,##0'
+            ws.cell(row=total_row, column=12, value="").font = Font(bold=True)
     
     # Điều chỉnh độ rộng cột
-    column_widths = [8, 12, 15, 15, 20, 12, 12, 20, 15, 18, 30]
+    if current_tab == "partner":
+        column_widths = [8, 12, 15, 15, 20, 12, 12, 15, 12, 20, 15, 18, 30]
+    else:
+        column_widths = [8, 12, 15, 15, 20, 12, 12, 15, 12, 20, 18, 30]
     for col, width in enumerate(column_widths, 1):
         ws.column_dimensions[get_column_letter(col)].width = width
     

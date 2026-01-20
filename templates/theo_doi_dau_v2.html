@@ -21,6 +21,9 @@
         <button class="sheet-tab" onclick="switchSheet('danh-sach')" id="tabDanhSach">
             📋 Danh sách đổ dầu
         </button>
+        <button class="sheet-tab" onclick="switchSheet('gia-dau')" id="tabGiaDau">
+            💰 Giá dầu
+        </button>
     </div>
 
     <!-- Sheet Total -->
@@ -145,6 +148,54 @@
                     </tr>
                     {% endif %}
                 </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <!-- Sheet Giá dầu -->
+    <div class="card sheet-content" id="sheetGiaDau" style="display: none;">
+        <div class="section-header">
+            <h3>💰 Giá dầu Diesel 0.05S</h3>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+            <button type="button" class="btn btn-primary" onclick="showAddPriceModal()">
+                ➕ Cập nhật giá xăng dầu hôm nay
+            </button>
+        </div>
+        
+        <div class="table-container-scroll">
+            <table class="fuel-records-table" id="dieselPriceTable">
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Ngày áp dụng</th>
+                        <th>Đơn giá dầu</th>
+                        <th>Ngày tạo</th>
+                        <th>Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody id="dieselPriceBody">
+                    {% if diesel_prices %}
+                        {% for price in diesel_prices %}
+                        <tr data-price-id="{{ price.id }}">
+                            <td>{{ loop.index }}</td>
+                            <td>{{ price.application_date.strftime('%d/%m/%Y') }}</td>
+                            <td class="number"><strong>{{ "{:,.0f}".format(price.unit_price) }} đ</strong></td>
+                            <td>{{ price.created_at.strftime('%d/%m/%Y %H:%M') if price.created_at else '' }}</td>
+                            <td class="actions">
+                                <button class="btn btn-warning btn-sm" onclick="editPrice({{ price.id }})" title="Sửa">
+                                    ✏️ Sửa
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center">Chưa có dữ liệu giá dầu. Nhấn nút "Cập nhật giá xăng dầu hôm nay" để thêm mới.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
             </table>
         </div>
     </div>
@@ -278,6 +329,37 @@
     </div>
 </div>
 
+<!-- Modal Thêm/Sửa giá dầu -->
+<div id="priceModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="priceModalTitle">➕ Cập nhật giá xăng dầu</h3>
+            <button class="modal-close" onclick="closePriceModal()" title="Đóng">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="priceForm" onsubmit="savePrice(event)">
+                <input type="hidden" id="priceId" name="price_id">
+                
+                <div class="form-group">
+                    <label for="priceApplicationDate">Ngày cập nhật giá <span class="required">*</span></label>
+                    <input type="date" id="priceApplicationDate" name="application_date" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="priceUnitPrice">Đơn giá dầu Diesel 0.05S (VNĐ) <span class="required">*</span></label>
+                    <input type="number" id="priceUnitPrice" name="unit_price" step="1" min="1" required placeholder="Nhập số nguyên" oninput="validateIntegerInput(this)">
+                    <small style="color: #666; font-size: 12px; margin-top: 5px; display: block;">Chỉ nhập số nguyên, không nhập số thập phân</small>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">💾 Lưu</button>
+                    <button type="button" class="btn btn-secondary" onclick="closePriceModal()">❌ Hủy bỏ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Danh sách biển số xe từ server -->
 <script>
 const vehiclesList = [
@@ -303,6 +385,16 @@ function formatDate(dateStr) {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
+}
+
+// Validate input chỉ cho phép số nguyên
+function validateIntegerInput(input) {
+    // Loại bỏ dấu chấm và số thập phân
+    if (input.value.includes('.')) {
+        input.value = Math.floor(parseFloat(input.value) || 0);
+    }
+    // Đảm bảo không có ký tự không phải số
+    input.value = input.value.replace(/[^0-9]/g, '');
 }
 
 // Tính thành tiền
@@ -754,6 +846,10 @@ window.onclick = function(event) {
     if (event.target === detailModal) {
         closeDetailModal();
     }
+    const priceModal = document.getElementById('priceModal');
+    if (event.target === priceModal) {
+        closePriceModal();
+    }
 }
 
 // ===== TOTAL SHEET FUNCTIONS =====
@@ -933,6 +1029,202 @@ function switchSheet(sheetName) {
     } else if (sheetName === 'danh-sach') {
         document.getElementById('sheetDanhSach').style.display = 'block';
         document.getElementById('tabDanhSach').classList.add('active');
+    } else if (sheetName === 'gia-dau') {
+        document.getElementById('sheetGiaDau').style.display = 'block';
+        document.getElementById('tabGiaDau').classList.add('active');
+        loadDieselPrices();
+    }
+}
+
+// ===== GIÁ DẦU FUNCTIONS =====
+
+let allDieselPrices = [];
+
+// Load danh sách giá dầu
+async function loadDieselPrices() {
+    try {
+        const response = await fetch('/api/diesel-price/all');
+        const data = await response.json();
+        
+        if (data.success && data.prices) {
+            allDieselPrices = data.prices;
+            renderPriceTable();
+        }
+    } catch (error) {
+        console.error('Error loading diesel prices:', error);
+    }
+}
+
+// Render bảng giá dầu
+function renderPriceTable() {
+    const tbody = document.getElementById('dieselPriceBody');
+    
+    if (allDieselPrices.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center">Chưa có dữ liệu giá dầu. Nhấn nút "Cập nhật giá xăng dầu hôm nay" để thêm mới.</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = allDieselPrices.map((price, index) => {
+        const createdDate = price.created_at ? formatDateTime(price.created_at) : '';
+        return `
+            <tr data-price-id="${price.id}">
+                <td>${index + 1}</td>
+                <td>${formatDate(price.application_date)}</td>
+                <td class="number"><strong>${formatCurrency(price.unit_price)} đ</strong></td>
+                <td>${createdDate}</td>
+                <td class="actions">
+                    <button class="btn btn-warning btn-sm" onclick="editPrice(${price.id})" title="Sửa">
+                        ✏️ Sửa
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Format datetime
+function formatDateTime(dateTimeStr) {
+    if (!dateTimeStr) return '';
+    try {
+        const date = new Date(dateTimeStr);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${day}/${month}/${year} ${hours}:${minutes}`;
+    } catch (e) {
+        return dateTimeStr;
+    }
+}
+
+// Hiển thị modal thêm giá dầu
+function showAddPriceModal() {
+    document.getElementById('priceModalTitle').textContent = '➕ Cập nhật giá xăng dầu hôm nay';
+    document.getElementById('priceId').value = '';
+    document.getElementById('priceForm').reset();
+    
+    // Set ngày mặc định là hôm nay
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    document.getElementById('priceApplicationDate').value = `${year}-${month}-${day}`;
+    
+    document.getElementById('priceModal').style.display = 'flex';
+}
+
+// Hiển thị modal sửa giá dầu
+async function editPrice(priceId) {
+    try {
+        const price = allDieselPrices.find(p => p.id === priceId);
+        if (!price) {
+            await loadDieselPrices();
+            const updatedPrice = allDieselPrices.find(p => p.id === priceId);
+            if (!updatedPrice) {
+                alert('Không tìm thấy bản ghi giá dầu');
+                return;
+            }
+            fillEditPriceForm(updatedPrice);
+        } else {
+            fillEditPriceForm(price);
+        }
+    } catch (error) {
+        console.error('Error loading price:', error);
+        alert('Lỗi khi tải thông tin giá dầu');
+    }
+}
+
+// Điền form sửa giá dầu
+function fillEditPriceForm(price) {
+    document.getElementById('priceModalTitle').textContent = '✏️ Sửa giá dầu';
+    document.getElementById('priceId').value = price.id;
+    document.getElementById('priceApplicationDate').value = price.application_date;
+    document.getElementById('priceUnitPrice').value = price.unit_price;
+    document.getElementById('priceModal').style.display = 'flex';
+}
+
+// Đóng modal giá dầu
+function closePriceModal() {
+    document.getElementById('priceModal').style.display = 'none';
+    document.getElementById('priceForm').reset();
+    document.getElementById('priceId').value = '';
+}
+
+// Lưu giá dầu (thêm mới hoặc sửa)
+async function savePrice(event) {
+    event.preventDefault();
+    
+    const priceId = document.getElementById('priceId').value;
+    const applicationDate = document.getElementById('priceApplicationDate').value;
+    const unitPrice = document.getElementById('priceUnitPrice').value;
+    
+    // Validate
+    if (!applicationDate) {
+        alert('Vui lòng chọn ngày cập nhật giá');
+        return;
+    }
+    
+    // Kiểm tra giá phải là số nguyên
+    const unitPriceInt = parseInt(unitPrice);
+    if (isNaN(unitPriceInt) || unitPriceInt <= 0) {
+        alert('Đơn giá phải là số nguyên lớn hơn 0');
+        return;
+    }
+    
+    // Kiểm tra nếu có số thập phân
+    if (parseFloat(unitPrice) !== unitPriceInt) {
+        alert('Đơn giá phải là số nguyên, không được nhập số thập phân');
+        return;
+    }
+    
+    const data = {
+        application_date: applicationDate,
+        unit_price: unitPriceInt
+    };
+    
+    const url = priceId ? `/api/diesel-price/edit/${priceId}` : '/api/diesel-price/add';
+    const method = priceId ? 'PUT' : 'POST';
+    
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(priceId ? 'Cập nhật giá dầu thành công' : 'Thêm giá dầu thành công');
+            closePriceModal();
+            await loadDieselPrices();
+        } else {
+            // Kiểm tra nếu là lỗi trùng ngày (khi thêm mới)
+            if (!priceId && result.error && result.error.includes('đã có giá dầu') && result.existing_id) {
+                const confirmUpdate = confirm('Ngày này đã có giá dầu. Bạn có muốn cập nhật lại không?');
+                if (confirmUpdate) {
+                    // Nếu đồng ý, sửa bản ghi hiện có
+                    closePriceModal();
+                    // Load lại danh sách để có dữ liệu mới nhất
+                    await loadDieselPrices();
+                    // Mở modal sửa với giá mới
+                    const existingPrice = allDieselPrices.find(p => p.id === result.existing_id);
+                    if (existingPrice) {
+                        fillEditPriceForm(existingPrice);
+                        // Cập nhật giá mới
+                        document.getElementById('priceUnitPrice').value = unitPriceInt;
+                    }
+                }
+            } else {
+                alert('Lỗi: ' + (result.error || 'Không thể lưu giá dầu'));
+            }
+        }
+    } catch (error) {
+        console.error('Error saving price:', error);
+        alert('Lỗi khi lưu giá dầu');
     }
 }
 

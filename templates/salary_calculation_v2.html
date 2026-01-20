@@ -119,10 +119,15 @@
                         {% if current_tab == 'partner' %}
                         <th>Đơn giá</th>
                         <th>Phí cầu đường</th>
+                        {% else %}
+                        <th>DK</th>
+                        <th>Tiền dầu</th>
                         {% endif %}
                         <th>Trạng thái</th>
                         <th>Lái xe</th>
+                        {% if current_tab == 'partner' %}
                         <th>Mã chuyến</th>
+                        {% endif %}
                         <th>{% if current_tab == 'partner' %}Tiền chuyến{% else %}Lương chuyến{% endif %}</th>
                         <th>Ghi chú</th>
                     </tr>
@@ -167,6 +172,31 @@
                                 <span style="color: #95a5a6;">0 VNĐ</span>
                             {% endif %}
                         </td>
+                        {% else %}
+                        <td>
+                            {% set fuel_data = item.fuel_data if item.fuel_data is defined else {} %}
+                            {% if fuel_data.warning %}
+                                <span style="color: #d32f2f; font-size: 11px; font-style: italic;" title="{{ fuel_data.warning }}">
+                                    ⚠️ {{ fuel_data.warning }}
+                                </span>
+                            {% elif fuel_data.dk_liters is defined and fuel_data.dk_liters > 0 %}
+                                <span style="color: #1976d2; font-weight: 600;">{{ "{:,.2f}".format(fuel_data.dk_liters) }} lít</span>
+                            {% else %}
+                                <span style="color: #95a5a6; font-style: italic;">--</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set fuel_data = item.fuel_data if item.fuel_data is defined else {} %}
+                            {% if fuel_data.warning %}
+                                <span style="color: #d32f2f; font-size: 11px; font-style: italic;" title="{{ fuel_data.warning }}">
+                                    --
+                                </span>
+                            {% elif fuel_data.fuel_cost is defined and fuel_data.fuel_cost > 0 %}
+                                <span style="color: #2e7d32; font-weight: 600;">{{ "{:,.0f}".format(fuel_data.fuel_cost) }} VNĐ</span>
+                            {% else %}
+                                <span style="color: #95a5a6;">0 VNĐ</span>
+                            {% endif %}
+                        </td>
                         {% endif %}
                         <td>
                             {% if result.status == 'OFF' or result.status == 'Off' %}
@@ -180,6 +210,7 @@
                             {% endif %}
                         </td>
                         <td><strong>{{ result.driver_name or '' }}</strong></td>
+                        {% if current_tab == 'partner' %}
                         <td>
                             {% if result.trip_code %}
                                 <span style="color: #1976d2; font-weight: 600; font-size: 12px;">{{ result.trip_code }}</span>
@@ -187,6 +218,7 @@
                                 <span style="color: #95a5a6; font-style: italic;">--</span>
                             {% endif %}
                         </td>
+                        {% endif %}
                         <td>
                             {% if result.status == 'OFF' or result.status == 'Off' %}
                                 <span style="color: #c62828; font-weight: bold;">0 VNĐ</span>

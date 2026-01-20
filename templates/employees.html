@@ -146,6 +146,18 @@
                     </div>
                 </div>
                 
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="social_insurance_salary">Mức lương tham gia BHXH</label>
+                        <input type="number" id="social_insurance_salary" name="social_insurance_salary" 
+                               placeholder="Nhập mức lương (số nguyên)" 
+                               min="0" step="1" 
+                               oninput="validateIntegerInput(this)">
+                        <small class="form-help">Chỉ nhập số nguyên dương. Để trống nếu chưa tham gia BHXH.</small>
+                        <div class="error-message" id="social_insurance_salary-error"></div>
+                    </div>
+                </div>
+                
                 <div class="form-row" style="display: none;">
                     <div class="form-group">
                         <label for="cccd_issue_date">Ngày cấp CCCD</label>
@@ -790,6 +802,29 @@ function deleteEmployee(id, name) {
     }
 }
 
+// Validate integer input for social insurance salary
+function validateIntegerInput(input) {
+    const value = input.value.trim();
+    const errorElement = document.getElementById('social_insurance_salary-error');
+    
+    if (value === '') {
+        errorElement.style.display = 'none';
+        errorElement.textContent = '';
+        return true;
+    }
+    
+    // Check if it's a valid positive integer
+    if (!/^\d+$/.test(value) || parseInt(value) <= 0) {
+        errorElement.textContent = 'Mức lương tham gia BHXH phải là số nguyên';
+        errorElement.style.display = 'block';
+        return false;
+    }
+    
+    errorElement.style.display = 'none';
+    errorElement.textContent = '';
+    return true;
+}
+
 // Xử lý form submit
 document.getElementById('addEmployeeForm').addEventListener('submit', async function(e) {
     e.preventDefault();
@@ -801,6 +836,12 @@ document.getElementById('addEmployeeForm').addEventListener('submit', async func
     const name = document.getElementById('name').value.trim();
     if (!name) {
         showError('name-error', 'Họ và tên là bắt buộc');
+        return;
+    }
+    
+    // Validate social insurance salary
+    const socialInsuranceSalary = document.getElementById('social_insurance_salary');
+    if (!validateIntegerInput(socialInsuranceSalary)) {
         return;
     }
     
