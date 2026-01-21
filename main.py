@@ -5444,6 +5444,473 @@ async def get_fuel_totals(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/api/fuel-quota/compare")
+async def compare_fuel_quota_with_actual(
+    db: Session = Depends(get_db),
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    license_plate: Optional[str] = None,
+    current_user = Depends(get_current_user)
+):
+    def _normalize_text_no_accents(text: str) -> str:
+        """Normalize Vietnamese text for stable sorting/comparison (remove accents, uppercase, trim)."""
+        if text is None:
+            return ""
+        s = unicodedata.normalize("NFKD", str(text))
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        return " ".join(s.strip().upper().split())
+
+    def _is_tang_cuong_route(route_code: str) -> bool:
+        """
+        Identify 'Tăng cường' routes.
+        We treat any route that contains 'TANG CUONG' (accent-insensitive) as reinforcement.
+        """
+        norm = _normalize_text_no_accents(route_code)
+        return "TANG CUONG" in norm
+
+    def _sort_fuel_quota_trips(trips: list[dict]) -> list[dict]:
+        """
+        Sorting rules (for UI + Excel consistency):
+        - Group by route_code
+        - Within each route_code: date ascending
+        - 'Tăng cường' group always at the end (still date ascending inside)
+        """
+        def _to_date_obj(v):
+            if v is None:
+                return date.min
+            if isinstance(v, datetime):
+                return v.date()
+            if isinstance(v, date):
+                return v
+            # Expect ISO yyyy-mm-dd from API payload
+            try:
+                return datetime.strptime(str(v), "%Y-%m-%d").date()
+            except Exception:
+                return date.min
+
+        def _key(x: dict):
+            route = (x.get("route_code") or "").strip()
+            is_tc = _is_tang_cuong_route(route)
+            # Force all reinforcement routes to the same group key, so they cluster at the end.
+            group = "ZZZ_TANG_CUONG" if is_tc else _normalize_text_no_accents(route)
+            d = _to_date_obj(x.get("date"))
+            return (is_tc, group, d, _normalize_text_no_accents(route))
+
+        return sorted(trips, key=_key)
+
+    """
+    So sánh dầu khoán (từ timekeeping) với dầu thực tế đã đổ trong khoảng thời gian.
+    - Chỉ áp dụng cho xe nhà.
+    - Chỉ tính các chuyến có Km > 0 và có đơn giá dầu hợp lệ tại ngày chạy.
+    """
+    if current_user is None:
+        return JSONResponse({"success": False, "message": "Bạn cần đăng nhập"}, status_code=401)
+    
+    # Validate input
+    if not from_date or not to_date or not license_plate:
+        return JSONResponse({"success": False, "message": "Thiếu tham số từ ngày, đến ngày hoặc biển số xe"}, status_code=400)
+    
+    try:
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").date()
+    except ValueError:
+        return JSONResponse({"success": False, "message": "Định dạng ngày không hợp lệ (yyyy-mm-dd)"}, status_code=400)
+    
+    if from_date_obj > to_date_obj:
+        return JSONResponse({"success": False, "message": "Từ ngày phải nhỏ hơn hoặc bằng Đến ngày"}, status_code=400)
+    
+    # Xác thực xe
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.license_plate == license_plate.strip(),
+        Vehicle.status == 1
+    ).first()
+    
+    if not vehicle:
+        return JSONResponse({"success": False, "message": "Không tìm thấy xe"}, status_code=404)
+    
+    if vehicle.vehicle_type != "Xe Nhà":
+        return JSONResponse({"success": False, "message": "Chỉ áp dụng cho xe nhà"}, status_code=400)
+    
+    if vehicle.fuel_consumption is None or vehicle.fuel_consumption <= 0:
+        return JSONResponse({"success": False, "message": "Xe chưa có định mức nhiên liệu, vui lòng cập nhật trước khi tính khoán dầu"}, status_code=400)
+    
+    fuel_consumption = vehicle.fuel_consumption
+    
+    # Lấy dữ liệu chấm công theo khoảng ngày và biển số
+    details = db.query(TimekeepingDetail).filter(
+        TimekeepingDetail.license_plate == license_plate.strip(),
+        TimekeepingDetail.date >= from_date_obj,
+        TimekeepingDetail.date <= to_date_obj
+    ).all()
+    
+    trips_data = []
+    total_quota_liters = 0.0
+    total_quota_cost = 0
+    skipped_no_distance = 0
+    skipped_no_price = 0
+    
+    for detail in details:
+        distance_km = detail.distance_km or 0
+        if distance_km <= 0:
+            skipped_no_distance += 1
+            continue
+        
+        fuel_price_record = get_fuel_price_by_date(db, detail.date)
+        if fuel_price_record is None or fuel_price_record.unit_price is None:
+            skipped_no_price += 1
+            continue
+        
+        dk_liters = round((distance_km * fuel_consumption) / 100.0, 2)
+        fuel_cost = int(round(dk_liters * fuel_price_record.unit_price))
+        
+        trips_data.append({
+            "date": detail.date.isoformat() if detail.date else "",
+            "license_plate": detail.license_plate or license_plate.strip(),
+            "route_code": detail.route_code or detail.route_name or "",
+            "distance_km": round(distance_km, 2),
+            "dk_liters": dk_liters,
+            "fuel_price": fuel_price_record.unit_price,
+            "fuel_cost": fuel_cost,
+            "status": detail.status or "Onl",
+            "driver_name": detail.driver_name or ""
+        })
+        
+        total_quota_liters += dk_liters
+        total_quota_cost += fuel_cost
+    
+    # Sắp xếp theo quy tắc UI: nhóm theo Mã tuyến, ngày tăng dần trong nhóm; 'Tăng cường' luôn ở cuối
+    trips_data = _sort_fuel_quota_trips(trips_data)
+    
+    # Tổng dầu thực tế đã đổ
+    fuel_records = db.query(FuelRecord).filter(
+        FuelRecord.license_plate == license_plate.strip(),
+        FuelRecord.date >= from_date_obj,
+        FuelRecord.date <= to_date_obj
+    ).all()
+    
+    actual_liters = sum(record.liters_pumped or 0 for record in fuel_records)
+    actual_cost = sum(record.cost_pumped or 0 for record in fuel_records)
+    
+    diff_liters = round(total_quota_liters - actual_liters, 2)
+    diff_cost = int(round(total_quota_cost - actual_cost))
+    
+    return JSONResponse({
+        "success": True,
+        "trips": trips_data,
+        "totals": {
+            "quota_liters": round(total_quota_liters, 2),
+            "quota_cost": int(total_quota_cost)
+        },
+        "actual": {
+            "liters": round(actual_liters, 2),
+            "cost": int(round(actual_cost))
+        },
+        "difference": {
+            "liters": diff_liters,
+            "cost": diff_cost
+        },
+        "meta": {
+            "skipped_no_distance": skipped_no_distance,
+            "skipped_no_price": skipped_no_price,
+            "license_plate": license_plate.strip(),
+            "from_date": from_date_obj.isoformat(),
+            "to_date": to_date_obj.isoformat()
+        }
+    })
+
+@app.get("/api/fuel-quota/export-excel")
+async def export_fuel_quota_excel(
+    db: Session = Depends(get_db),
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    license_plate: Optional[str] = None,
+    current_user = Depends(get_current_user)
+):
+    def _normalize_text_no_accents(text: str) -> str:
+        """Normalize Vietnamese text for stable sorting/comparison (remove accents, uppercase, trim)."""
+        if text is None:
+            return ""
+        s = unicodedata.normalize("NFKD", str(text))
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        return " ".join(s.strip().upper().split())
+
+    def _is_tang_cuong_route(route_code: str) -> bool:
+        norm = _normalize_text_no_accents(route_code)
+        return "TANG CUONG" in norm
+
+    def _sort_fuel_quota_trips(trips: list[dict]) -> list[dict]:
+        def _to_date_obj(v):
+            if v is None:
+                return date.min
+            if isinstance(v, datetime):
+                return v.date()
+            if isinstance(v, date):
+                return v
+            try:
+                return datetime.strptime(str(v), "%Y-%m-%d").date()
+            except Exception:
+                return date.min
+
+        def _key(x: dict):
+            route = (x.get("route_code") or "").strip()
+            is_tc = _is_tang_cuong_route(route)
+            group = "ZZZ_TANG_CUONG" if is_tc else _normalize_text_no_accents(route)
+            d = _to_date_obj(x.get("date"))
+            return (is_tc, group, d, _normalize_text_no_accents(route))
+
+        return sorted(trips, key=_key)
+
+    """Xuất Excel bảng khoán dầu - So sánh dầu khoán với dầu thực tế"""
+    if current_user is None:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    # Validate input
+    if not from_date or not to_date or not license_plate:
+        return JSONResponse({"success": False, "message": "Thiếu tham số từ ngày, đến ngày hoặc biển số xe"}, status_code=400)
+    
+    try:
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").date()
+    except ValueError:
+        return JSONResponse({"success": False, "message": "Định dạng ngày không hợp lệ (yyyy-mm-dd)"}, status_code=400)
+    
+    if from_date_obj > to_date_obj:
+        return JSONResponse({"success": False, "message": "Từ ngày phải nhỏ hơn hoặc bằng Đến ngày"}, status_code=400)
+    
+    # Xác thực xe
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.license_plate == license_plate.strip(),
+        Vehicle.status == 1
+    ).first()
+    
+    if not vehicle:
+        return JSONResponse({"success": False, "message": "Không tìm thấy xe"}, status_code=404)
+    
+    if vehicle.vehicle_type != "Xe Nhà":
+        return JSONResponse({"success": False, "message": "Chỉ áp dụng cho xe nhà"}, status_code=400)
+    
+    if vehicle.fuel_consumption is None or vehicle.fuel_consumption <= 0:
+        return JSONResponse({"success": False, "message": "Xe chưa có định mức nhiên liệu"}, status_code=400)
+    
+    fuel_consumption = vehicle.fuel_consumption
+    
+    # Lấy dữ liệu chấm công theo khoảng ngày và biển số
+    details = db.query(TimekeepingDetail).filter(
+        TimekeepingDetail.license_plate == license_plate.strip(),
+        TimekeepingDetail.date >= from_date_obj,
+        TimekeepingDetail.date <= to_date_obj
+    ).all()
+    
+    trips_data = []
+    total_quota_liters = 0.0
+    total_quota_cost = 0
+    
+    for detail in details:
+        distance_km = detail.distance_km or 0
+        if distance_km <= 0:
+            continue
+        
+        fuel_price_record = get_fuel_price_by_date(db, detail.date)
+        if fuel_price_record is None or fuel_price_record.unit_price is None:
+            continue
+        
+        dk_liters = round((distance_km * fuel_consumption) / 100.0, 2)
+        fuel_cost = int(round(dk_liters * fuel_price_record.unit_price))
+        
+        trips_data.append({
+            "date": detail.date,
+            "license_plate": detail.license_plate or license_plate.strip(),
+            "route_code": detail.route_code or detail.route_name or "",
+            "distance_km": round(distance_km, 2),
+            "dk_liters": dk_liters,
+            "fuel_price": fuel_price_record.unit_price,
+            "fuel_cost": fuel_cost,
+            "status": detail.status or "Onl",
+            "driver_name": detail.driver_name or ""
+        })
+        
+        total_quota_liters += dk_liters
+        total_quota_cost += fuel_cost
+    
+    # Sắp xếp theo quy tắc UI: nhóm theo Mã tuyến, ngày tăng dần trong nhóm; 'Tăng cường' luôn ở cuối
+    trips_data = _sort_fuel_quota_trips(trips_data)
+    
+    # Tổng dầu thực tế đã đổ
+    fuel_records = db.query(FuelRecord).filter(
+        FuelRecord.license_plate == license_plate.strip(),
+        FuelRecord.date >= from_date_obj,
+        FuelRecord.date <= to_date_obj
+    ).all()
+    
+    actual_liters = sum(record.liters_pumped or 0 for record in fuel_records)
+    actual_cost = sum(record.cost_pumped or 0 for record in fuel_records)
+    
+    diff_liters = round(total_quota_liters - actual_liters, 2)
+    diff_cost = int(round(total_quota_cost - actual_cost))
+    
+    # Tạo workbook Excel
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Khoán dầu"
+    
+    # Định dạng header
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Tiêu đề báo cáo
+    ws.merge_cells('A1:H1')
+    ws['A1'] = "BẢNG KHOÁN DẦU"
+    ws['A1'].font = Font(bold=True, size=16)
+    ws['A1'].alignment = Alignment(horizontal="center")
+    
+    # Thông tin khoảng thời gian và biển số xe
+    ws.merge_cells('A2:H2')
+    date_text = f"Biển số xe: {license_plate.strip()} - Từ ngày: {from_date_obj.strftime('%d/%m/%Y')} - Đến ngày: {to_date_obj.strftime('%d/%m/%Y')}"
+    ws['A2'] = date_text
+    ws['A2'].alignment = Alignment(horizontal="center")
+    ws['A2'].font = Font(italic=True)
+    
+    # Header bảng
+    headers = ["Ngày", "Biển số xe", "Mã tuyến", "Km chuyến", "DK (lít)", "Tiền dầu", "Trạng thái", "Lái xe"]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=col_idx)
+        cell.value = header
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+    
+    # Dữ liệu chi tiết
+    row_num = 4
+    for trip in trips_data:
+        ws.cell(row=row_num, column=1).value = trip["date"].strftime('%d/%m/%Y') if trip["date"] else ""
+        ws.cell(row=row_num, column=2).value = trip["license_plate"]
+        ws.cell(row=row_num, column=3).value = trip["route_code"]
+        ws.cell(row=row_num, column=4).value = trip["distance_km"]
+        ws.cell(row=row_num, column=4).number_format = '0.00'
+        ws.cell(row=row_num, column=5).value = trip["dk_liters"]
+        ws.cell(row=row_num, column=5).number_format = '0.00'
+        ws.cell(row=row_num, column=6).value = trip["fuel_cost"]
+        ws.cell(row=row_num, column=6).number_format = '#,##0'
+        status_label = "OFF" if (trip["status"] or "").lower().startswith("off") else "ON"
+        ws.cell(row=row_num, column=7).value = status_label
+        ws.cell(row=row_num, column=8).value = trip["driver_name"]
+        
+        # Border cho các ô
+        for col in range(1, 9):
+            ws.cell(row=row_num, column=col).border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+        
+        row_num += 1
+    
+    # Dòng tổng hợp
+    summary_font = Font(bold=True)
+    summary_fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+    
+    # Tổng khoán
+    ws.cell(row=row_num, column=1).value = "Tổng khoán"
+    ws.merge_cells(f'A{row_num}:D{row_num}')
+    for col in range(1, 9):
+        cell = ws.cell(row=row_num, column=col)
+        cell.font = summary_font
+        cell.fill = summary_fill
+        cell.border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+    ws.cell(row=row_num, column=5).value = round(total_quota_liters, 2)
+    ws.cell(row=row_num, column=5).number_format = '0.00'
+    ws.cell(row=row_num, column=6).value = total_quota_cost
+    ws.cell(row=row_num, column=6).number_format = '#,##0'
+    
+    row_num += 1
+    
+    # Dầu thực tế
+    ws.cell(row=row_num, column=1).value = "Dầu thực tế"
+    ws.merge_cells(f'A{row_num}:D{row_num}')
+    for col in range(1, 9):
+        cell = ws.cell(row=row_num, column=col)
+        cell.font = summary_font
+        cell.fill = summary_fill
+        cell.border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+    ws.cell(row=row_num, column=5).value = round(actual_liters, 2)
+    ws.cell(row=row_num, column=5).number_format = '0.00'
+    ws.cell(row=row_num, column=6).value = actual_cost
+    ws.cell(row=row_num, column=6).number_format = '#,##0'
+    
+    row_num += 1
+    
+    # Chênh lệch
+    ws.cell(row=row_num, column=1).value = "Chênh lệch (Khoán - Thực tế)"
+    ws.merge_cells(f'A{row_num}:D{row_num}')
+    for col in range(1, 9):
+        cell = ws.cell(row=row_num, column=col)
+        cell.font = summary_font
+        cell.fill = summary_fill
+        cell.border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+    ws.cell(row=row_num, column=5).value = diff_liters
+    ws.cell(row=row_num, column=5).number_format = '0.00'
+    if diff_liters < 0:
+        ws.cell(row=row_num, column=5).font = Font(bold=True, color="E74C3C")
+    elif diff_liters > 0:
+        ws.cell(row=row_num, column=5).font = Font(bold=True, color="27AE60")
+    
+    ws.cell(row=row_num, column=6).value = diff_cost
+    ws.cell(row=row_num, column=6).number_format = '#,##0'
+    if diff_cost < 0:
+        ws.cell(row=row_num, column=6).font = Font(bold=True, color="E74C3C")
+    elif diff_cost > 0:
+        ws.cell(row=row_num, column=6).font = Font(bold=True, color="27AE60")
+    
+    # Điều chỉnh độ rộng cột
+    ws.column_dimensions['A'].width = 12
+    ws.column_dimensions['B'].width = 15
+    ws.column_dimensions['C'].width = 15
+    ws.column_dimensions['D'].width = 12
+    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions['F'].width = 15
+    ws.column_dimensions['G'].width = 12
+    ws.column_dimensions['H'].width = 20
+    
+    # Tạo file Excel trong memory
+    from io import BytesIO
+    excel_file = BytesIO()
+    wb.save(excel_file)
+    excel_file.seek(0)
+    
+    # Tên file
+    from_date_str = from_date_obj.strftime('%d-%m-%Y')
+    to_date_str = to_date_obj.strftime('%d-%m-%Y')
+    filename = f"Khoan_dau_{license_plate.strip().replace('-', '_')}_Tu_{from_date_str}_Den_{to_date_str}.xlsx"
+    
+    return Response(
+        content=excel_file.read(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 # ===== API ENDPOINTS CHO QUẢN LÝ GIÁ DẦU =====
 
 @app.get("/api/diesel-price/all")
@@ -6072,6 +6539,7 @@ async def salary_calculation_v2_page(
     driver_name: Optional[str] = None,
     license_plate: Optional[str] = None,
     tab: Optional[str] = None,
+    search: Optional[str] = None,
     current_user = Depends(get_current_user)
 ):
     """Trang Bảng Tính Lương Ver 2.0 - Hỗ trợ 2 tab: Tính lương lái xe và Tính tiền xe đối tác"""
@@ -6109,12 +6577,16 @@ async def salary_calculation_v2_page(
     if not to_date:
         to_date = last_day_of_month.strftime("%Y-%m-%d")
     
-    results = []
+    # Chỉ thực hiện tìm kiếm khi người dùng nhấn nút Tìm kiếm (search=1)
+    has_search = search == "1"
+    
+    # Mặc định: chưa tìm kiếm thì không trả về kết quả để tránh gọi DB không cần thiết
+    results = [] if has_search else None
     selected_driver = None
     selected_license_plate = None
     
     # Thực hiện tìm kiếm với giá trị mặc định hoặc giá trị được cung cấp
-    if from_date and to_date:
+    if has_search and from_date and to_date:
         try:
             from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
             to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").date()
@@ -6255,7 +6727,8 @@ async def salary_calculation_v2_page(
         "selected_license_plate": selected_license_plate,
         "results": results,
         "current_tab": current_tab,
-        "partner_vehicles": partner_vehicle_plates
+        "partner_vehicles": partner_vehicle_plates,
+        "has_search": has_search
     })
 
 @app.get("/salary-calculation-v2/export-excel")

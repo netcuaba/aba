@@ -18,6 +18,9 @@
         <button class="sheet-tab active" onclick="switchSheet('total')" id="tabTotal">
             📊 Total
         </button>
+        <button class="sheet-tab" onclick="switchSheet('khoan-dau')" id="tabKhoanDau">
+            ⛽ Khoán dầu
+        </button>
         <button class="sheet-tab" onclick="switchSheet('danh-sach')" id="tabDanhSach">
             📋 Danh sách đổ dầu
         </button>
@@ -87,6 +90,91 @@
                 </tfoot>
             </table>
         </div>
+    </div>
+
+    <!-- Sheet Khoán dầu -->
+    <div class="card sheet-content" id="sheetKhoanDau" style="display: none;">
+        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0;">⛽ Khoán dầu (Xe nhà)</h3>
+            <button type="button" class="btn btn-success" id="exportQuotaExcelBtn" onclick="exportFuelQuotaExcel()" style="display: none;">
+                <i class="fas fa-file-excel"></i> Xuất Excel
+            </button>
+        </div>
+        
+        <!-- Bộ lọc khoán dầu -->
+        <div class="filter-section">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label for="quotaFromDate">Từ ngày <span class="required">*</span></label>
+                    <input type="date" id="quotaFromDate" class="filter-input">
+                </div>
+                <div class="filter-group">
+                    <label for="quotaToDate">Đến ngày <span class="required">*</span></label>
+                    <input type="date" id="quotaToDate" class="filter-input">
+                </div>
+                <div class="filter-group">
+                    <label for="quotaLicensePlate">Biển số xe (chỉ Xe nhà) <span class="required">*</span></label>
+                    <select id="quotaLicensePlate" class="filter-input">
+                        <option value="">-- Chọn biển số xe (Xe Nhà) --</option>
+                        {% for vehicle in vehicles %}
+                            {% if vehicle.vehicle_type == 'Xe Nhà' %}
+                            <option value="{{ vehicle.license_plate }}">{{ vehicle.license_plate }}</option>
+                            {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <button type="button" class="btn btn-primary" onclick="loadFuelQuotaComparison()">
+                        🔍 Tìm kiếm
+                    </button>
+                </div>
+            </div>
+            <p class="info-text" style="margin-top: 10px;">Nguồn dữ liệu: chấm công chi tiết (timekeeping-v1) + giá dầu theo ngày. Chỉ tính chuyến có Km > 0 và có giá dầu áp dụng.</p>
+        </div>
+        
+        <!-- Bảng khoán dầu -->
+        <div class="table-container-scroll">
+            <table class="fuel-records-table" id="fuelQuotaTable">
+                <thead>
+                    <tr>
+                        <th>Ngày</th>
+                        <th>Biển số xe</th>
+                        <th>Mã tuyến</th>
+                        <th>Km chuyến</th>
+                        <th>DK</th>
+                        <th>Tiền dầu</th>
+                        <th>Trạng thái</th>
+                        <th>Lái xe</th>
+                    </tr>
+                </thead>
+                <tbody id="fuelQuotaBody">
+                    <tr>
+                        <td colspan="8" class="text-center">Chọn khoảng ngày, biển số rồi bấm "Tìm kiếm" để xem khoán dầu.</td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr class="summary-row">
+                        <td colspan="4"><strong>Tổng khoán</strong></td>
+                        <td class="number"><strong id="quotaTotalLiters">0.00 lít</strong></td>
+                        <td class="number"><strong id="quotaTotalCost">0 đ</strong></td>
+                        <td colspan="2"></td>
+                    </tr>
+                    <tr class="summary-row">
+                        <td colspan="4"><strong>Dầu thực tế</strong></td>
+                        <td class="number"><strong id="actualTotalLiters">0.00 lít</strong></td>
+                        <td class="number"><strong id="actualTotalCost">0 đ</strong></td>
+                        <td colspan="2"></td>
+                    </tr>
+                    <tr class="summary-row">
+                        <td colspan="4"><strong>Chênh lệch (Khoán - Thực tế)</strong></td>
+                        <td class="number"><strong id="diffLiters">0.00 lít</strong></td>
+                        <td class="number"><strong id="diffCost">0 đ</strong></td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        <p class="info-text" id="fuelQuotaNote" style="margin-top: 12px;"></p>
     </div>
 
     <!-- Sheet Danh sách đổ dầu -->
@@ -954,6 +1042,178 @@ function renderTotalsTable(totals, fromDate, toDate) {
     }
 }
 
+// ===== KHOÁN DẦU FUNCTIONS =====
+
+function resetFuelQuotaSummary() {
+    document.getElementById('quotaTotalLiters').textContent = '0.00 lít';
+    document.getElementById('quotaTotalCost').textContent = '0 đ';
+    document.getElementById('actualTotalLiters').textContent = '0.00 lít';
+    document.getElementById('actualTotalCost').textContent = '0 đ';
+    const diffLitersEl = document.getElementById('diffLiters');
+    const diffCostEl = document.getElementById('diffCost');
+    if (diffLitersEl) {
+        diffLitersEl.textContent = '0.00 lít';
+        diffLitersEl.classList.remove('text-positive', 'text-negative');
+    }
+    if (diffCostEl) {
+        diffCostEl.textContent = '0 đ';
+        diffCostEl.classList.remove('text-positive', 'text-negative');
+    }
+    // Ẩn button Xuất Excel khi reset
+    const exportBtn = document.getElementById('exportQuotaExcelBtn');
+    if (exportBtn) {
+        exportBtn.style.display = 'none';
+    }
+}
+
+function applyDiffClass(element, value) {
+    if (!element) return;
+    element.classList.remove('text-positive', 'text-negative');
+    if (value > 0) {
+        element.classList.add('text-positive');
+    } else if (value < 0) {
+        element.classList.add('text-negative');
+    }
+}
+
+function renderFuelQuotaTable(data) {
+    const tbody = document.getElementById('fuelQuotaBody');
+    const noteEl = document.getElementById('fuelQuotaNote');
+    const exportBtn = document.getElementById('exportQuotaExcelBtn');
+    const totals = data?.totals || {};
+    const actual = data?.actual || {};
+    const diff = data?.difference || {};
+    const meta = data?.meta || {};
+    const trips = data?.trips || [];
+    
+    noteEl.textContent = '';
+    
+    // Hiển thị/ẩn button Xuất Excel
+    if (exportBtn) {
+        if (trips.length > 0) {
+            exportBtn.style.display = 'inline-block';
+        } else {
+            exportBtn.style.display = 'none';
+        }
+    }
+    
+    if (!trips.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">Không có chuyến hợp lệ trong khoảng thời gian đã chọn.</td></tr>';
+    } else {
+        tbody.innerHTML = trips.map((trip, index) => {
+            const statusLabel = (trip.status || '').toString().toLowerCase().startsWith('off') ? 'Offline' : 'Online';
+            return `
+                <tr>
+                    <td>${formatDate(trip.date)}</td>
+                    <td><strong>${trip.license_plate || ''}</strong></td>
+                    <td>${trip.route_code || ''}</td>
+                    <td class="number">${(trip.distance_km ?? 0).toFixed(2)}</td>
+                    <td class="number">${(trip.dk_liters ?? 0).toFixed(2)} lít</td>
+                    <td class="number"><strong>${formatCurrency(trip.fuel_cost || 0)} đ</strong></td>
+                    <td>${statusLabel}</td>
+                    <td>${trip.driver_name || ''}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+    
+    document.getElementById('quotaTotalLiters').textContent = `${(totals.quota_liters ?? 0).toFixed(2)} lít`;
+    document.getElementById('quotaTotalCost').textContent = `${formatCurrency(totals.quota_cost ?? 0)} đ`;
+    document.getElementById('actualTotalLiters').textContent = `${(actual.liters ?? 0).toFixed(2)} lít`;
+    document.getElementById('actualTotalCost').textContent = `${formatCurrency(actual.cost ?? 0)} đ`;
+    
+    const diffLitersEl = document.getElementById('diffLiters');
+    const diffCostEl = document.getElementById('diffCost');
+    const diffLitersVal = diff.liters ?? 0;
+    const diffCostVal = diff.cost ?? 0;
+    diffLitersEl.textContent = `${diffLitersVal.toFixed(2)} lít`;
+    diffCostEl.textContent = `${formatCurrency(diffCostVal)} đ`;
+    applyDiffClass(diffLitersEl, diffLitersVal);
+    applyDiffClass(diffCostEl, diffCostVal);
+    
+    const metaNotes = [];
+    if (meta.skipped_no_distance) {
+        metaNotes.push(`Bỏ qua ${meta.skipped_no_distance} chuyến không có Km.`);
+    }
+    if (meta.skipped_no_price) {
+        metaNotes.push(`Bỏ qua ${meta.skipped_no_price} chuyến chưa có giá dầu áp dụng.`);
+    }
+    if (metaNotes.length > 0) {
+        noteEl.textContent = metaNotes.join(' ');
+    }
+}
+
+async function loadFuelQuotaComparison() {
+    const fromDate = document.getElementById('quotaFromDate').value;
+    const toDate = document.getElementById('quotaToDate').value;
+    const licensePlate = document.getElementById('quotaLicensePlate').value;
+    const tbody = document.getElementById('fuelQuotaBody');
+    const noteEl = document.getElementById('fuelQuotaNote');
+    const exportBtn = document.getElementById('exportQuotaExcelBtn');
+    
+    if (!fromDate || !toDate || !licensePlate) {
+        alert('Vui lòng chọn đủ Từ ngày, Đến ngày và Biển số xe (Xe Nhà)');
+        return;
+    }
+    
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center">Đang tải dữ liệu khoán dầu...</td></tr>';
+    noteEl.textContent = '';
+    resetFuelQuotaSummary();
+    
+    // Ẩn button Xuất Excel khi đang tải
+    if (exportBtn) {
+        exportBtn.style.display = 'none';
+    }
+    
+    try {
+        const url = `/api/fuel-quota/compare?from_date=${fromDate}&to_date=${toDate}&license_plate=${encodeURIComponent(licensePlate)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.message || data.error || 'Không thể tải dữ liệu khoán dầu');
+        }
+        
+        renderFuelQuotaTable(data);
+    } catch (error) {
+        console.error('Error loading fuel quota comparison:', error);
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">Không thể tải dữ liệu khoán dầu.</td></tr>';
+        noteEl.textContent = error.message || 'Lỗi không xác định';
+        resetFuelQuotaSummary();
+    }
+}
+
+function exportFuelQuotaExcel() {
+    const fromDate = document.getElementById('quotaFromDate').value;
+    const toDate = document.getElementById('quotaToDate').value;
+    const licensePlate = document.getElementById('quotaLicensePlate').value;
+    
+    // Kiểm tra điều kiện bắt buộc
+    if (!fromDate || !toDate || !licensePlate) {
+        alert('Vui lòng chọn đủ Từ ngày, Đến ngày và Biển số xe trước khi xuất Excel!');
+        return;
+    }
+    
+    // Validate dates
+    if (new Date(fromDate) > new Date(toDate)) {
+        alert('Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc!');
+        return;
+    }
+    
+    // Kiểm tra xem đã có dữ liệu chưa
+    const tbody = document.getElementById('fuelQuotaBody');
+    if (!tbody || tbody.innerHTML.includes('Chọn khoảng ngày') || tbody.innerHTML.includes('Không có chuyến')) {
+        alert('Vui lòng thực hiện tìm kiếm trước khi xuất Excel!');
+        return;
+    }
+    
+    // Tạo URL với các tham số filter
+    const exportUrl = `/api/fuel-quota/export-excel?from_date=${encodeURIComponent(fromDate)}&to_date=${encodeURIComponent(toDate)}&license_plate=${encodeURIComponent(licensePlate)}`;
+    
+    // Mở URL để download file
+    window.location.href = exportUrl;
+}
+
 // Hiển thị modal chi tiết
 async function showDetailModal(licensePlate, fromDate, toDate) {
     try {
@@ -1029,6 +1289,9 @@ function switchSheet(sheetName) {
     } else if (sheetName === 'danh-sach') {
         document.getElementById('sheetDanhSach').style.display = 'block';
         document.getElementById('tabDanhSach').classList.add('active');
+    } else if (sheetName === 'khoan-dau') {
+        document.getElementById('sheetKhoanDau').style.display = 'block';
+        document.getElementById('tabKhoanDau').classList.add('active');
     } else if (sheetName === 'gia-dau') {
         document.getElementById('sheetGiaDau').style.display = 'block';
         document.getElementById('tabGiaDau').classList.add('active');
@@ -1236,12 +1499,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // Khởi tạo giá trị mặc định cho bộ lọc Total
     const filterFromDate = document.getElementById('filterFromDate');
     const filterToDate = document.getElementById('filterToDate');
+    const quotaFromDate = document.getElementById('quotaFromDate');
+    const quotaToDate = document.getElementById('quotaToDate');
     
     if (filterFromDate && !filterFromDate.value) {
         filterFromDate.value = getFirstDayOfMonth();
     }
     if (filterToDate && !filterToDate.value) {
         filterToDate.value = getLastDayOfMonth();
+    }
+    if (quotaFromDate && !quotaFromDate.value) {
+        quotaFromDate.value = getFirstDayOfMonth();
+    }
+    if (quotaToDate && !quotaToDate.value) {
+        quotaToDate.value = getLastDayOfMonth();
     }
     
     // Đảm bảo sheet Total được hiển thị mặc định
@@ -1508,6 +1779,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
 .text-center {
     text-align: center;
+}
+
+.text-positive {
+    color: #27ae60;
+    font-weight: 600;
+}
+
+.text-negative {
+    color: #e74c3c;
+    font-weight: 600;
 }
 
 /* Buttons */
