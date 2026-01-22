@@ -31,12 +31,12 @@ body {
 /* ===== NAVIGATION BAR ===== */
 .nav-bar {
     background: white;
-    padding: 15px 20px;
+    padding: 10px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 15px;
+    gap: 12px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     position: sticky;
     top: 4px;
@@ -47,7 +47,7 @@ body {
 .nav-container {
     display: flex;
     flex-wrap: wrap;
-    gap: 25px;
+    gap: 12px;
     flex: 1;
     justify-content: flex-start;
     align-items: center;
@@ -79,14 +79,14 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     text-decoration: none;
     color: #333;
     transition: all 0.2s ease;
-    padding: 10px 12px;
-    border-radius: 8px;
-    min-width: 80px;
-    max-width: 100px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    min-width: 60px;
+    max-width: 75px;
     flex: 0 0 auto;
     position: relative;
 }
@@ -113,8 +113,8 @@ body {
 }
 
 .nav-icon-box {
-    width: 50px;
-    height: 50px;
+    width: 36px;
+    height: 36px;
     background: transparent;
     border: none;
     border-radius: 0;
@@ -126,11 +126,11 @@ body {
 }
 
 .nav-card:hover .nav-icon-box {
-    transform: scale(1.1);
+    transform: scale(1.05);
 }
 
 .nav-icon-box i {
-    font-size: 32px;
+    font-size: 20px;
     color: #4a90e2;
     transition: all 0.2s ease;
 }
@@ -144,7 +144,7 @@ body {
 }
 
 .nav-label {
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 400;
     text-align: center;
     color: #333;
@@ -171,16 +171,46 @@ body {
 .nav-dropdown-toggle {
     cursor: pointer;
     position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+    color: #333;
+    transition: all 0.2s ease;
+    padding: 6px 8px;
+    border-radius: 6px;
+    min-width: 60px;
+    max-width: 75px;
+    flex: 0 0 auto;
+}
+
+.nav-dropdown-toggle .nav-icon-box {
+    width: 36px;
+    height: 36px;
+}
+
+.nav-dropdown-toggle .nav-icon-box i {
+    font-size: 20px;
+}
+
+.nav-dropdown-toggle .nav-label {
+    font-size: 10px;
+}
+
+.nav-dropdown-toggle:hover {
+    background: #e8f4f8;
 }
 
 .dropdown-arrow {
     position: absolute;
-    bottom: 2px;
+    bottom: 0;
     right: 2px;
-    font-size: 9px;
+    font-size: 7px;
     color: #999;
     transition: transform 0.3s ease, color 0.3s ease;
     z-index: 1;
+    line-height: 1;
 }
 
 .nav-dropdown.active .dropdown-arrow {
@@ -204,24 +234,25 @@ body {
 .nav-dropdown-menu {
     display: none;
     position: absolute;
-    top: 100%;
+    top: calc(100% + 6px);
     left: 0;
     background: white;
     border: 1px solid #e1e8ed;
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     list-style: none;
-    margin: 8px 0 0 0;
-    padding: 8px 0;
-    min-width: 220px;
+    margin: 0;
+    padding: 6px 0;
+    min-width: 180px;
     z-index: 1000;
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(-8px);
     transition: opacity 0.2s ease, transform 0.2s ease;
     pointer-events: none;
 }
 
-.nav-dropdown.active .nav-dropdown-menu {
+.nav-dropdown.active .nav-dropdown-menu,
+.nav-dropdown:hover .nav-dropdown-menu {
     display: block;
     opacity: 1;
     transform: translateY(0);
@@ -235,8 +266,8 @@ body {
 .nav-dropdown-menu a {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 20px;
+    gap: 10px;
+    padding: 10px 16px;
     text-decoration: none;
     color: #333;
     transition: all 0.2s ease;
@@ -244,6 +275,7 @@ body {
     background: white;
     width: 100%;
     text-align: left;
+    font-size: 13px;
 }
 
 .nav-dropdown-menu a:hover {
@@ -252,8 +284,8 @@ body {
 }
 
 .nav-dropdown-menu a i {
-    font-size: 16px;
-    width: 20px;
+    font-size: 14px;
+    width: 18px;
     text-align: center;
     color: #4a90e2;
 }
@@ -264,7 +296,7 @@ body {
 
 .nav-dropdown-menu a span {
     flex: 1;
-    font-size: 14px;
+    font-size: 13px;
 }
 
 .nav-dropdown-menu .disabled-link {
@@ -300,41 +332,94 @@ body {
 
 .nav-card .dev-badge {
     position: absolute;
-    top: 5px;
-    right: 5px;
+    top: 3px;
+    right: 3px;
     background: #5dade2;
     color: white;
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 8px;
+    font-size: 8px;
     font-weight: 600;
     white-space: nowrap;
+}
+
+/* Tooltip styles */
+.nav-card[data-tooltip],
+.nav-dropdown-toggle[data-tooltip] {
+    position: relative;
+}
+
+.nav-card[data-tooltip]:hover::after,
+.nav-dropdown-toggle[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 10px;
+    background: #2c3e50;
+    color: white;
+    font-size: 11px;
+    white-space: nowrap;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    z-index: 1001;
+    pointer-events: none;
+    opacity: 0;
+    animation: tooltipFadeIn 0.2s ease forwards;
+}
+
+.nav-card[data-tooltip]:hover::before,
+.nav-dropdown-toggle[data-tooltip]:hover::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #2c3e50;
+    margin-bottom: 1px;
+    z-index: 1001;
+    pointer-events: none;
+    opacity: 0;
+    animation: tooltipFadeIn 0.2s ease forwards;
+}
+
+@keyframes tooltipFadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
 }
 
 .nav-user-section {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 12px;
     flex-shrink: 0;
 }
 
 .user-info {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 16px;
+    gap: 8px;
+    padding: 6px 12px;
     background: #f8f9fa;
-    border-radius: 25px;
+    border-radius: 20px;
     border: 1px solid #e1e8ed;
 }
 
 .user-info i {
     color: #4a90e2;
-    font-size: 16px;
+    font-size: 14px;
 }
 
 .user-name {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     color: #2c3e50;
 }
@@ -342,22 +427,22 @@ body {
 .user-role-badge {
     background: #4a90e2;
     color: white;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
     font-weight: 600;
 }
 
 .btn-logout {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 10px 18px;
+    gap: 5px;
+    padding: 8px 14px;
     background: #e74c3c;
     border: none;
-    border-radius: 6px;
+    border-radius: 5px;
     color: white;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.3s ease;
@@ -413,38 +498,45 @@ body {
 /* Responsive Navigation */
 @media (max-width: 1200px) {
     .nav-card {
-        min-width: 75px;
-        max-width: 90px;
-        padding: 8px 10px;
-        gap: 6px;
+        min-width: 58px;
+        max-width: 70px;
+        padding: 5px 7px;
+        gap: 3px;
     }
     
     .nav-icon-box {
-        width: 45px;
-        height: 45px;
+        width: 34px;
+        height: 34px;
     }
     
     .nav-icon-box i {
-        font-size: 28px;
+        font-size: 19px;
     }
     
     .nav-label {
-        font-size: 11px;
+        font-size: 9px;
+    }
+    
+    .nav-dropdown-toggle {
+        min-width: 58px;
+        max-width: 70px;
+        padding: 5px 7px;
+        gap: 3px;
     }
     
     .nav-dropdown-menu {
-        min-width: 200px;
+        min-width: 170px;
     }
 }
 
 @media (max-width: 768px) {
     .nav-bar {
-        padding: 12px 10px;
-        gap: 10px;
+        padding: 8px 12px;
+        gap: 8px;
     }
     
     .nav-container {
-        gap: 15px;
+        gap: 10px;
         justify-content: flex-start;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
@@ -453,37 +545,53 @@ body {
     }
     
     .nav-card {
-        min-width: 70px;
-        max-width: 80px;
-        padding: 8px;
+        min-width: 55px;
+        max-width: 65px;
+        padding: 5px 6px;
         flex-shrink: 0;
-        gap: 5px;
+        gap: 3px;
     }
     
     .nav-icon-box {
-        width: 40px;
-        height: 40px;
+        width: 32px;
+        height: 32px;
     }
     
     .nav-icon-box i {
-        font-size: 24px;
+        font-size: 18px;
     }
     
     .nav-label {
-        font-size: 10px;
+        font-size: 9px;
+    }
+    
+    .nav-dropdown-toggle {
+        min-width: 55px;
+        max-width: 65px;
+        padding: 5px 6px;
+        gap: 3px;
     }
     
     .nav-dropdown-menu {
         position: fixed;
         left: 50%;
-        transform: translateX(-50%);
-        min-width: 250px;
+        transform: translateX(-50%) translateY(-8px);
+        min-width: 220px;
         max-width: 90vw;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
     }
     
     .nav-dropdown.active .nav-dropdown-menu {
         transform: translateX(-50%) translateY(0);
+    }
+    
+    /* Disable hover on mobile */
+    .nav-dropdown:hover .nav-dropdown-menu {
+        display: none;
+    }
+    
+    .nav-dropdown.active:hover .nav-dropdown-menu {
+        display: block;
     }
     
     .nav-user-section {
@@ -523,31 +631,42 @@ body {
 
 @media (max-width: 480px) {
     .nav-card {
-        min-width: 65px;
-        max-width: 70px;
-        padding: 6px;
-        gap: 4px;
+        min-width: 50px;
+        max-width: 60px;
+        padding: 4px 5px;
+        gap: 2px;
     }
     
     .nav-icon-box {
-        width: 36px;
-        height: 36px;
+        width: 30px;
+        height: 30px;
     }
     
     .nav-icon-box i {
-        font-size: 20px;
+        font-size: 16px;
     }
     
     .nav-label {
-        font-size: 9px;
+        font-size: 8px;
+    }
+    
+    .nav-dropdown-toggle {
+        min-width: 50px;
+        max-width: 60px;
+        padding: 4px 5px;
+        gap: 2px;
     }
     
     .nav-bar {
-        padding: 10px 8px;
+        padding: 8px 10px;
     }
     
     .nav-container {
-        gap: 10px;
+        gap: 8px;
+    }
+    
+    .nav-dropdown-menu {
+        min-width: 200px;
     }
 }
 

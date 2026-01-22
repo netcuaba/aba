@@ -1006,31 +1006,65 @@ document.getElementById('inspection_documents').addEventListener('change', funct
 // Xem sổ đăng kiểm
 async function viewInspectionDocuments(vehicleId) {
     try {
+        console.log(`DEBUG: Loading documents for vehicle ID: ${vehicleId}`);
         const response = await fetch(`/vehicles/documents/${vehicleId}`);
         const data = await response.json();
         
+        console.log('DEBUG: API response:', data);
+        
         const content = document.getElementById('inspectionContent');
         
-        if (data.success && data.documents.length > 0) {
+        if (!data.success) {
+            content.innerHTML = `<p style="text-align: center; color: #e74c3c; padding: 20px;">
+                <i class="fas fa-exclamation-triangle"></i><br>
+                <strong>Lỗi:</strong> ${data.error || 'Không thể tải sổ đăng kiểm'}
+            </p>`;
+            openInspectionModal();
+            return;
+        }
+        
+        if (data.documents && data.documents.length > 0) {
             let html = '<div class="documents-list">';
+            let hasValidDocuments = false;
             
             data.documents.forEach(doc => {
+                console.log(`DEBUG: Processing document: ${doc.filename}, exists: ${doc.exists}`);
+                
                 if (doc.exists) {
+                    hasValidDocuments = true;
                     html += `
                         <div class="document-item">
                             ${doc.extension === '.pdf' ? 
                                 `<div style="width: 80px; height: 80px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 5px;">
                                     <span style="font-size: 24px;">📄</span>
                                 </div>` :
-                                `<img src="${doc.url}" alt="${doc.filename}" onerror="this.style.display='none'">`
+                                `<img src="${doc.url}" alt="${doc.filename}" style="max-width: 200px; max-height: 200px; border-radius: 5px;" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'width: 80px; height: 80px; background: #fee; display: flex; align-items: center; justify-content: center; border-radius: 5px;\\'><span style=\\'font-size: 24px;\\'>⚠️</span></div>'">`
                             }
                             <div class="document-info">
                                 <strong>${doc.filename}</strong><br>
-                                <small>Kích thước: ${(doc.size / 1024).toFixed(1)} KB</small>
+                                <small>Kích thước: ${doc.size ? (doc.size / 1024).toFixed(1) + ' KB' : 'N/A'}</small>
                             </div>
                             <div class="document-actions">
                                 <a href="${doc.url}" target="_blank" class="btn btn-sm btn-primary">Xem</a>
-                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteDocument(${vehicleId}, '${doc.filename}')">Xóa</button>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteDocument(${vehicleId}, '${doc.filename.replace(/'/g, "\\'")}')">Xóa</button>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Hiển thị file không tồn tại với thông báo rõ ràng
+                    html += `
+                        <div class="document-item" style="opacity: 0.7; border-left: 3px solid #e74c3c;">
+                            <div style="width: 80px; height: 80px; background: #fee; display: flex; align-items: center; justify-content: center; border-radius: 5px;">
+                                <span style="font-size: 24px;">⚠️</span>
+                            </div>
+                            <div class="document-info">
+                                <strong>${doc.filename}</strong><br>
+                                <small style="color: #e74c3c;">
+                                    <i class="fas fa-exclamation-triangle"></i> ${doc.error || 'File không tồn tại'}
+                                </small>
+                            </div>
+                            <div class="document-actions">
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteDocument(${vehicleId}, '${doc.filename.replace(/'/g, "\\'")}')">Xóa khỏi danh sách</button>
                             </div>
                         </div>
                     `;
@@ -1038,15 +1072,26 @@ async function viewInspectionDocuments(vehicleId) {
             });
             
             html += '</div>';
+            
+            if (!hasValidDocuments && data.documents.length > 0) {
+                html += '<p style="text-align: center; color: #e74c3c; padding: 10px; margin-top: 10px; background: #fee; border-radius: 5px;"><i class="fas fa-exclamation-triangle"></i> Tất cả file đều không tồn tại trên server. Vui lòng upload lại.</p>';
+            }
+            
             content.innerHTML = html;
         } else {
-            content.innerHTML = '<p style="text-align: center; color: #7f8c8d;">Chưa có sổ đăng kiểm nào</p>';
+            content.innerHTML = '<p style="text-align: center; color: #7f8c8d; padding: 20px;"><i class="fas fa-file-alt"></i><br>Chưa có sổ đăng kiểm nào</p>';
         }
         
         openInspectionModal();
     } catch (error) {
         console.error('Lỗi khi tải sổ đăng kiểm:', error);
-        alert('Có lỗi xảy ra khi tải sổ đăng kiểm');
+        const content = document.getElementById('inspectionContent');
+        content.innerHTML = `<p style="text-align: center; color: #e74c3c; padding: 20px;">
+            <i class="fas fa-exclamation-triangle"></i><br>
+            <strong>Lỗi:</strong> Có lỗi xảy ra khi tải sổ đăng kiểm<br>
+            <small>${error.message || 'Vui lòng thử lại sau'}</small>
+        </p>`;
+        openInspectionModal();
     }
 }
 

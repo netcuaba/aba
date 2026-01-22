@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}Không có quyền truy cập - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+    <div class="access-denied-container">
+        <div class="access-denied-content">
+            <div class="access-denied-icon">
+                <i class="fas fa-ban"></i>
+            </div>
+            <h1>❌ Bạn không có quyền truy cập vào page này</h1>
+            <p class="access-denied-message">
+                Bạn không có quyền truy cập vào trang này. Vui lòng liên hệ quản trị viên để được cấp quyền.
+            </p>
+            <div class="countdown-section">
+                <p class="countdown-text">
+                    Tự động quay lại sau <span id="countdown">10</span> giây
+                </p>
+                <div class="countdown-bar">
+                    <div class="countdown-progress" id="countdown-progress"></div>
+                </div>
+            </div>
+            <div class="action-buttons">
+                <button type="button" class="btn btn-primary btn-lg" onclick="goBack()">
+                    <i class="fas fa-arrow-left"></i> Quay lại ngay
+                </button>
+                <a href="/" class="btn btn-secondary btn-lg">
+                    <i class="fas fa-home"></i> Về trang chủ
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.access-denied-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 70vh;
+    padding: 20px;
+}
+
+.access-denied-content {
+    text-align: center;
+    max-width: 600px;
+    background: white;
+    padding: 40px;
+    border-radius: 15px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.access-denied-icon {
+    font-size: 80px;
+    color: #e74c3c;
+    margin-bottom: 20px;
+    animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-10px); }
+    75% { transform: translateX(10px); }
+}
+
+.access-denied-content h1 {
+    color: #2c3e50;
+    font-size: 28px;
+    margin-bottom: 15px;
+    font-weight: 600;
+}
+
+.access-denied-message {
+    color: #7f8c8d;
+    font-size: 16px;
+    margin-bottom: 30px;
+    line-height: 1.6;
+}
+
+.countdown-section {
+    margin: 30px 0;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+}
+
+.countdown-text {
+    font-size: 18px;
+    color: #34495e;
+    margin-bottom: 15px;
+    font-weight: 600;
+}
+
+.countdown-text span {
+    color: #e74c3c;
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.countdown-bar {
+    width: 100%;
+    height: 8px;
+    background: #ecf0f1;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+.countdown-progress {
+    height: 100%;
+    background: linear-gradient(90deg, #e74c3c, #c0392b);
+    width: 100%;
+    transition: width 0.1s linear;
+    border-radius: 4px;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 30px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background-color: #3498db;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+}
+
+.btn-secondary {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #7f8c8d;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(149, 165, 166, 0.3);
+}
+
+.btn-lg {
+    padding: 14px 28px;
+    font-size: 18px;
+}
+</style>
+
+<script>
+let countdown = 10;
+const countdownElement = document.getElementById('countdown');
+const progressElement = document.getElementById('countdown-progress');
+
+function updateCountdown() {
+    countdownElement.textContent = countdown;
+    progressElement.style.width = (countdown / 10 * 100) + '%';
+    
+    if (countdown <= 0) {
+        goBack();
+    } else {
+        countdown--;
+        setTimeout(updateCountdown, 1000);
+    }
+}
+
+function goBack() {
+    // Thử quay lại trang trước
+    if (window.history.length > 1) {
+        window.history.back();
+    } else {
+        // Nếu không có trang trước, về trang chủ
+        window.location.href = '/';
+    }
+}
+
+// Bắt đầu countdown
+updateCountdown();
+</script>
+{% endblock %}
+

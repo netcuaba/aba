@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 
-{% block title %}Quản lý tài khoản - Hệ thống quản lý vận chuyển{% endblock %}
+{% block title %}Quản lý tài khoản & Phân quyền - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
 <div class="page-wrapper">
 <div class="page-header">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
         <div>
-            <h2>👤 Quản lý tài khoản</h2>
-            <p>Quản lý tài khoản người dùng trong hệ thống (Chỉ dành cho Admin)</p>
+            <h2>👤 Quản lý tài khoản & Phân quyền</h2>
+            <p>Quản lý người dùng, tài khoản và phân quyền trong hệ thống (Chỉ dành cho Admin)</p>
         </div>
         <button type="button" class="btn btn-primary btn-lg" onclick="openAddAccountModal()">
             <i class="fas fa-user-plus"></i> Thêm tài khoản
@@ -25,46 +25,102 @@
                 <tr>
                     <th>STT</th>
                     <th>Username</th>
-                    <th>Password</th>
-                    <th>Phân quyền (Role)</th>
+                    <th>Họ tên</th>
+                    <th>Email</th>
+                    <th>SĐT</th>
+                    <th>Vai trò</th>
+                    <th>Trạng thái</th>
+                    <th>Lần đăng nhập cuối</th>
                     <th>Thao tác</th>
                 </tr>
             </thead>
             <tbody>
                 {% for account in accounts %}
-                <tr>
-                    <td>{{ loop.index }}</td>
+                <tr class="{% if account.is_locked == 1 %}locked-row{% endif %}">
+                    <td>{{ (page - 1) * per_page + loop.index }}</td>
                     <td><strong>{{ account.username }}</strong></td>
-                    <td>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span class="password-display" id="password-{{ account.id }}" data-password="{{ account.password }}">
-                                ********
-                            </span>
-                            <button type="button" class="btn-icon" onclick="togglePassword({{ account.id }})" title="Hiển thị/Ẩn mật khẩu">
-                                <i class="fas fa-eye" id="eye-icon-{{ account.id }}"></i>
-                            </button>
-                        </div>
-                    </td>
+                    <td>{{ account.full_name or '-' }}</td>
+                    <td>{{ account.email or '-' }}</td>
+                    <td>{{ account.phone or '-' }}</td>
                     <td>
                         <span class="role-badge role-{{ account.role.lower() }}">
                             {{ account.role }}
                         </span>
                     </td>
                     <td>
-                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteAccount({{ account.id }}, '{{ account.username }}')">
-                            <i class="fas fa-trash"></i> Xóa
-                        </button>
+                        <span class="status-badge status-{{ account.status.lower() }}">
+                            {% if account.is_locked == 1 %}
+                                🔒 Khoá
+                            {% else %}
+                                {{ account.status }}
+                            {% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        {% if account.last_login %}
+                            {{ account.last_login|to_local_time }}
+                        {% else %}
+                            Chưa đăng nhập
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="action-buttons">
+                            <button type="button" class="btn btn-sm btn-info" onclick="openEditModal({{ account.id }}, '{{ account.username }}', '{{ account.full_name or '' }}', '{{ account.email or '' }}', '{{ account.phone or '' }}', '{{ account.role }}', '{{ account.status }}')" title="Sửa">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            {% if account.role != "Admin" %}
+                            <button type="button" class="btn btn-sm btn-primary" onclick="openPermissionsModal({{ account.id }}, '{{ account.username }}')" title="Phân quyền">
+                                <i class="fas fa-user-shield"></i>
+                            </button>
+                            {% endif %}
+                            <button type="button" class="btn btn-sm btn-warning" onclick="openResetPasswordModal({{ account.id }}, '{{ account.username }}')" title="Reset mật khẩu">
+                                <i class="fas fa-key"></i>
+                            </button>
+                            {% if account.is_locked == 1 %}
+                                <button type="button" class="btn btn-sm btn-success" onclick="unlockAccount({{ account.id }}, '{{ account.username }}')" title="Mở khoá">
+                                    <i class="fas fa-unlock"></i>
+                                </button>
+                            {% else %}
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="lockAccount({{ account.id }}, '{{ account.username }}')" title="Khoá">
+                                    <i class="fas fa-lock"></i>
+                                </button>
+                            {% endif %}
+                            {% if account.status == "Active" %}
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteAccount({{ account.id }}, '{{ account.username }}')" title="Xóa">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    
+    <!-- Phân trang -->
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+            <a href="?page={{ page - 1 }}" class="btn btn-sm">
+                <i class="fas fa-chevron-left"></i> Trước
+            </a>
+        {% endif %}
+        
+        <span class="page-info">Trang {{ page }} / {{ total_pages }} (Tổng: {{ total }} tài khoản)</span>
+        
+        {% if page < total_pages %}
+            <a href="?page={{ page + 1 }}" class="btn btn-sm">
+                Sau <i class="fas fa-chevron-right"></i>
+            </a>
+        {% endif %}
+    </div>
+    {% endif %}
     {% else %}
     <div class="no-data">
         <div class="no-data-icon">👤</div>
-        <h3>Chưa có tài khoản nào</h3>
-        <p>Hãy thêm tài khoản đầu tiên bằng nút "Thêm tài khoản" bên trên</p>
+        <h3>Không tìm thấy tài khoản nào</h3>
+        <p>Hãy thử lại với bộ lọc khác hoặc thêm tài khoản mới</p>
     </div>
     {% endif %}
 </div>
@@ -85,29 +141,159 @@
                 </div>
                 
                 <div class="form-group">
-                    <label for="password">Password *</label>
-                    <input type="password" id="password" name="password" required placeholder="Nhập mật khẩu">
+                    <label for="full_name">Họ tên</label>
+                    <input type="text" id="full_name" name="full_name" placeholder="Nhập họ tên">
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" placeholder="Nhập email">
+                </div>
+                
+                <div class="form-group">
+                    <label for="phone">Số điện thoại</label>
+                    <input type="text" id="phone" name="phone" placeholder="Nhập số điện thoại">
+                </div>
+                
+                <div class="form-group">
+                    <label for="role">Vai trò (Role) *</label>
+                    <select id="role" name="role" required>
+                        <option value="">-- Chọn vai trò --</option>
+                        <option value="Admin">Admin (Quản trị hệ thống)</option>
+                        <option value="Manager">Manager (Quản lý)</option>
+                        <option value="User">User (Nhân viên)</option>
+                    </select>
+                    <div class="error-message" id="role-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="status">Trạng thái *</label>
+                    <select id="status" name="status" required>
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="auto_generate_password" name="auto_generate_password" value="true" onchange="togglePasswordField()">
+                        Tự động tạo mật khẩu
+                    </label>
+                </div>
+                
+                <div class="form-group" id="password-group">
+                    <label for="password">Mật khẩu *</label>
+                    <input type="password" id="password" name="password" placeholder="Nhập mật khẩu">
                     <small class="form-help">
                         Mật khẩu phải có: ít nhất 8 ký tự, 1 chữ in hoa (A-Z), 1 chữ thường (a-z), 1 chữ số (0-9)
                     </small>
                     <div class="error-message" id="password-error"></div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="role">Phân quyền (Role) *</label>
-                    <select id="role" name="role" required>
-                        <option value="">-- Chọn phân quyền --</option>
-                        <option value="Admin">Admin</option>
-                        <option value="User">User</option>
-                        <option value="Guest">Guest</option>
-                    </select>
-                    <div class="error-message" id="role-error"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeAddAccountModal()">Hủy</button>
                 <button type="submit" class="btn btn-primary">
                     <i class="fas fa-save"></i> Lưu
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Sửa tài khoản -->
+<div id="editAccountModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-edit"></i> Sửa thông tin tài khoản</h3>
+            <span class="close" onclick="closeEditModal()">&times;</span>
+        </div>
+        <form id="editAccountForm">
+            <input type="hidden" id="edit_account_id" name="account_id">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="edit_username" disabled style="background-color: #f5f5f5;">
+                    <small class="form-help">Username không thể thay đổi</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_full_name">Họ tên</label>
+                    <input type="text" id="edit_full_name" name="full_name" placeholder="Nhập họ tên">
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_email">Email</label>
+                    <input type="email" id="edit_email" name="email" placeholder="Nhập email">
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_phone">Số điện thoại</label>
+                    <input type="text" id="edit_phone" name="phone" placeholder="Nhập số điện thoại">
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_role">Vai trò (Role) *</label>
+                    <select id="edit_role" name="role" required>
+                        <option value="Admin">Admin (Quản trị hệ thống)</option>
+                        <option value="Manager">Manager (Quản lý)</option>
+                        <option value="User">User (Nhân viên)</option>
+                    </select>
+                    <div class="error-message" id="edit-role-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_status">Trạng thái *</label>
+                    <select id="edit_status" name="status" required>
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Hủy</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Lưu
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Reset mật khẩu -->
+<div id="resetPasswordModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-key"></i> Reset / Đổi mật khẩu</h3>
+            <span class="close" onclick="closeResetPasswordModal()">&times;</span>
+        </div>
+        <form id="resetPasswordForm">
+            <input type="hidden" id="reset_account_id" name="account_id">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Tài khoản</label>
+                    <input type="text" id="reset_username" disabled style="background-color: #f5f5f5;">
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="reset_auto_generate" name="auto_generate" value="true" onchange="toggleResetPasswordField()">
+                        Tự động tạo mật khẩu
+                    </label>
+                </div>
+                
+                <div class="form-group" id="reset-password-group">
+                    <label for="reset_new_password">Mật khẩu mới *</label>
+                    <input type="password" id="reset_new_password" name="new_password" placeholder="Nhập mật khẩu mới">
+                    <small class="form-help">
+                        Mật khẩu phải có: ít nhất 8 ký tự, 1 chữ in hoa (A-Z), 1 chữ thường (a-z), 1 chữ số (0-9)
+                    </small>
+                    <div class="error-message" id="reset-password-error"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeResetPasswordModal()">Hủy</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Đổi mật khẩu
                 </button>
             </div>
         </form>
@@ -133,6 +319,34 @@
     padding: 12px 24px;
     font-size: 16px;
     border-radius: 8px;
+}
+
+.filter-section {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.filter-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #555;
+}
+
+.filter-group input,
+.filter-group select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 14px;
 }
 
 .table-section {
@@ -166,30 +380,13 @@
     background-color: #f8f9fa;
 }
 
+.data-table tbody tr.locked-row {
+    background-color: #fff3cd;
+    opacity: 0.8;
+}
+
 .data-table tbody tr:last-child td {
     border-bottom: none;
-}
-
-.password-display {
-    font-family: monospace;
-    font-size: 14px;
-    color: #333;
-    min-width: 100px;
-    display: inline-block;
-}
-
-.btn-icon {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: #3498db;
-    padding: 4px 8px;
-    font-size: 16px;
-    transition: color 0.2s;
-}
-
-.btn-icon:hover {
-    color: #2980b9;
 }
 
 .role-badge {
@@ -206,14 +403,122 @@
     color: white;
 }
 
+.role-manager {
+    background-color: #f39c12;
+    color: white;
+}
+
 .role-user {
     background-color: #3498db;
     color: white;
 }
 
-.role-guest {
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.status-active {
+    background-color: #27ae60;
+    color: white;
+}
+
+.status-inactive {
     background-color: #95a5a6;
     color: white;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-primary {
+    background-color: #3498db;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+}
+
+.btn-secondary {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #7f8c8d;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b;
+}
+
+.btn-info {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.btn-info:hover {
+    background-color: #138496;
+}
+
+.btn-warning {
+    background-color: #ffc107;
+    color: #212529;
+}
+
+.btn-warning:hover {
+    background-color: #e0a800;
+}
+
+.btn-success {
+    background-color: #28a745;
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: #218838;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    padding: 20px;
+    background: #f8f9fa;
+}
+
+.page-info {
+    font-size: 14px;
+    color: #555;
 }
 
 .no-data {
@@ -250,7 +555,7 @@
     padding: 0;
     border: 1px solid #888;
     width: 90%;
-    max-width: 500px;
+    max-width: 600px;
     border-radius: 10px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
@@ -316,6 +621,7 @@
     border-radius: 5px;
     font-size: 14px;
     transition: border-color 0.2s;
+    box-sizing: border-box;
 }
 
 .form-group input:focus,
@@ -342,88 +648,154 @@
     display: block;
 }
 
-.btn {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 14px;
+.permissions-table-wrapper {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.permissions-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.permissions-table thead {
+    position: sticky;
+    top: 0;
+    background: #34495e;
+    z-index: 10;
+}
+
+.permissions-table th {
+    padding: 12px 15px;
+    text-align: left;
+    font-weight: 600;
+    color: white;
+    border-bottom: 2px solid #2c3e50;
+}
+
+.permissions-table tbody tr {
+    border-bottom: 1px solid #ecf0f1;
     transition: background-color 0.2s;
-    text-decoration: none;
-    display: inline-block;
 }
 
-.btn-primary {
-    background-color: #3498db;
-    color: white;
+.permissions-table tbody tr:hover {
+    background-color: #f8f9fa;
 }
 
-.btn-primary:hover {
-    background-color: #2980b9;
+.permissions-table tbody tr:last-child {
+    border-bottom: none;
 }
 
-.btn-secondary {
-    background-color: #95a5a6;
-    color: white;
+.permissions-table td {
+    padding: 12px 15px;
+    vertical-align: middle;
 }
 
-.btn-secondary:hover {
-    background-color: #7f8c8d;
+.permissions-table td:first-child {
+    font-weight: 500;
+    color: #2c3e50;
 }
 
-.btn-danger {
-    background-color: #e74c3c;
-    color: white;
+.permissions-table td:last-child {
+    text-align: center;
 }
 
-.btn-danger:hover {
-    background-color: #c0392b;
-}
-
-.btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
+.permissions-table input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    accent-color: #3498db;
 }
 </style>
 
 <script>
-// Toggle hiển thị/ẩn mật khẩu
-function togglePassword(accountId) {
-    const passwordDisplay = document.getElementById(`password-${accountId}`);
-    const eyeIcon = document.getElementById(`eye-icon-${accountId}`);
-    const actualPassword = passwordDisplay.getAttribute('data-password');
+// Toggle password field
+function togglePasswordField() {
+    const autoGen = document.getElementById('auto_generate_password').checked;
+    const passwordGroup = document.getElementById('password-group');
+    const passwordInput = document.getElementById('password');
     
-    if (passwordDisplay.textContent === '********') {
-        // Hiển thị mật khẩu
-        passwordDisplay.textContent = actualPassword;
-        eyeIcon.classList.remove('fa-eye');
-        eyeIcon.classList.add('fa-eye-slash');
+    if (autoGen) {
+        passwordGroup.style.display = 'none';
+        passwordInput.removeAttribute('required');
     } else {
-        // Ẩn mật khẩu
-        passwordDisplay.textContent = '********';
-        eyeIcon.classList.remove('fa-eye-slash');
-        eyeIcon.classList.add('fa-eye');
+        passwordGroup.style.display = 'block';
+        passwordInput.setAttribute('required', 'required');
     }
 }
 
-// Mở modal thêm tài khoản
+function toggleResetPasswordField() {
+    const autoGen = document.getElementById('reset_auto_generate').checked;
+    const passwordGroup = document.getElementById('reset-password-group');
+    const passwordInput = document.getElementById('reset_new_password');
+    
+    if (autoGen) {
+        passwordGroup.style.display = 'none';
+        passwordInput.removeAttribute('required');
+    } else {
+        passwordGroup.style.display = 'block';
+        passwordInput.setAttribute('required', 'required');
+    }
+}
+
+// Modal functions - Add Account
 function openAddAccountModal() {
     document.getElementById('addAccountModal').style.display = 'block';
-    // Reset form
     document.getElementById('addAccountForm').reset();
-    // Clear errors
+    document.getElementById('password-group').style.display = 'block';
+    document.getElementById('password').setAttribute('required', 'required');
     document.querySelectorAll('.error-message').forEach(el => {
         el.classList.remove('show');
         el.textContent = '';
     });
 }
 
-// Đóng modal thêm tài khoản
 function closeAddAccountModal() {
     document.getElementById('addAccountModal').style.display = 'none';
 }
 
-// Validate password policy
+// Modal functions - Edit Account
+function openEditModal(id, username, fullName, email, phone, role, status) {
+    document.getElementById('editAccountModal').style.display = 'block';
+    document.getElementById('edit_account_id').value = id;
+    document.getElementById('edit_username').value = username;
+    document.getElementById('edit_full_name').value = fullName || '';
+    document.getElementById('edit_email').value = email || '';
+    document.getElementById('edit_phone').value = phone || '';
+    document.getElementById('edit_role').value = role;
+    document.getElementById('edit_status').value = status;
+    document.querySelectorAll('.error-message').forEach(el => {
+        el.classList.remove('show');
+        el.textContent = '';
+    });
+}
+
+function closeEditModal() {
+    document.getElementById('editAccountModal').style.display = 'none';
+}
+
+// Modal functions - Reset Password
+function openResetPasswordModal(id, username) {
+    document.getElementById('resetPasswordModal').style.display = 'block';
+    document.getElementById('reset_account_id').value = id;
+    document.getElementById('reset_username').value = username;
+    document.getElementById('resetPasswordForm').reset();
+    document.getElementById('reset-password-group').style.display = 'block';
+    document.getElementById('reset_new_password').setAttribute('required', 'required');
+    document.querySelectorAll('.error-message').forEach(el => {
+        el.classList.remove('show');
+        el.textContent = '';
+    });
+}
+
+function closeResetPasswordModal() {
+    document.getElementById('resetPasswordModal').style.display = 'none';
+}
+
+// Validate password
 function validatePassword(password) {
     const errors = [];
     
@@ -446,65 +818,43 @@ function validatePassword(password) {
     return errors;
 }
 
-// Xử lý submit form thêm tài khoản
+// Form handlers
 document.getElementById('addAccountForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
-    // Clear previous errors
     document.querySelectorAll('.error-message').forEach(el => {
         el.classList.remove('show');
         el.textContent = '';
     });
     
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value;
-    const role = document.getElementById('role').value;
+    const formData = new FormData();
+    formData.append('username', document.getElementById('username').value.trim());
+    formData.append('full_name', document.getElementById('full_name').value.trim());
+    formData.append('email', document.getElementById('email').value.trim());
+    formData.append('phone', document.getElementById('phone').value.trim());
+    formData.append('role', document.getElementById('role').value);
+    formData.append('status', document.getElementById('status').value);
     
-    let hasError = false;
+    const autoGen = document.getElementById('auto_generate_password').checked;
+    formData.append('auto_generate_password', autoGen ? 'true' : 'false');
     
-    // Validate username
-    if (!username) {
-        const errorEl = document.getElementById('username-error');
-        errorEl.textContent = 'Vui lòng nhập username';
-        errorEl.classList.add('show');
-        hasError = true;
-    }
-    
-    // Validate password
-    if (!password) {
-        const errorEl = document.getElementById('password-error');
-        errorEl.textContent = 'Vui lòng nhập mật khẩu';
-        errorEl.classList.add('show');
-        hasError = true;
-    } else {
+    if (!autoGen) {
+        const password = document.getElementById('password').value;
+        if (!password) {
+            document.getElementById('password-error').textContent = 'Vui lòng nhập mật khẩu';
+            document.getElementById('password-error').classList.add('show');
+            return;
+        }
         const passwordErrors = validatePassword(password);
         if (passwordErrors.length > 0) {
-            const errorEl = document.getElementById('password-error');
-            errorEl.textContent = passwordErrors[0];
-            errorEl.classList.add('show');
-            hasError = true;
+            document.getElementById('password-error').textContent = passwordErrors[0];
+            document.getElementById('password-error').classList.add('show');
+            return;
         }
-    }
-    
-    // Validate role
-    if (!role) {
-        const errorEl = document.getElementById('role-error');
-        errorEl.textContent = 'Vui lòng chọn phân quyền';
-        errorEl.classList.add('show');
-        hasError = true;
-    }
-    
-    if (hasError) {
-        return;
-    }
-    
-    // Submit form
-    try {
-        const formData = new FormData();
-        formData.append('username', username);
         formData.append('password', password);
-        formData.append('role', role);
-        
+    }
+    
+    try {
         const response = await fetch('/accounts/add', {
             method: 'POST',
             body: formData
@@ -513,19 +863,20 @@ document.getElementById('addAccountForm').addEventListener('submit', async funct
         const result = await response.json();
         
         if (result.success) {
-            alert(result.message);
+            if (result.data && result.data.password) {
+                alert(`Tài khoản đã được tạo thành công!\n\nUsername: ${result.data.username}\nPassword: ${result.data.password}\n\nVui lòng lưu lại thông tin này!`);
+            } else {
+                alert(result.message);
+            }
             closeAddAccountModal();
             location.reload();
         } else {
-            // Hiển thị lỗi từ server
             if (result.message.includes('username') || result.message.includes('Username')) {
-                const errorEl = document.getElementById('username-error');
-                errorEl.textContent = result.message;
-                errorEl.classList.add('show');
+                document.getElementById('username-error').textContent = result.message;
+                document.getElementById('username-error').classList.add('show');
             } else if (result.message.includes('password') || result.message.includes('Mật khẩu')) {
-                const errorEl = document.getElementById('password-error');
-                errorEl.textContent = result.message;
-                errorEl.classList.add('show');
+                document.getElementById('password-error').textContent = result.message;
+                document.getElementById('password-error').classList.add('show');
             } else {
                 alert(result.message);
             }
@@ -535,9 +886,145 @@ document.getElementById('addAccountForm').addEventListener('submit', async funct
     }
 });
 
-// Xóa tài khoản
+document.getElementById('editAccountForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    document.querySelectorAll('.error-message').forEach(el => {
+        el.classList.remove('show');
+        el.textContent = '';
+    });
+    
+    const accountId = document.getElementById('edit_account_id').value;
+    const formData = new FormData();
+    formData.append('full_name', document.getElementById('edit_full_name').value.trim());
+    formData.append('email', document.getElementById('edit_email').value.trim());
+    formData.append('phone', document.getElementById('edit_phone').value.trim());
+    formData.append('role', document.getElementById('edit_role').value);
+    formData.append('status', document.getElementById('edit_status').value);
+    
+    try {
+        const response = await fetch(`/accounts/update/${accountId}`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(result.message);
+            closeEditModal();
+            location.reload();
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('Có lỗi xảy ra: ' + error.message);
+    }
+});
+
+document.getElementById('resetPasswordForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    document.querySelectorAll('.error-message').forEach(el => {
+        el.classList.remove('show');
+        el.textContent = '';
+    });
+    
+    const accountId = document.getElementById('reset_account_id').value;
+    const formData = new FormData();
+    
+    const autoGen = document.getElementById('reset_auto_generate').checked;
+    formData.append('auto_generate', autoGen ? 'true' : 'false');
+    
+    if (!autoGen) {
+        const password = document.getElementById('reset_new_password').value;
+        if (!password) {
+            document.getElementById('reset-password-error').textContent = 'Vui lòng nhập mật khẩu mới';
+            document.getElementById('reset-password-error').classList.add('show');
+            return;
+        }
+        const passwordErrors = validatePassword(password);
+        if (passwordErrors.length > 0) {
+            document.getElementById('reset-password-error').textContent = passwordErrors[0];
+            document.getElementById('reset-password-error').classList.add('show');
+            return;
+        }
+        formData.append('new_password', password);
+    }
+    
+    try {
+        const response = await fetch(`/accounts/reset-password/${accountId}`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            if (result.data && result.data.password) {
+                alert(`Mật khẩu đã được đổi thành công!\n\nPassword mới: ${result.data.password}\n\nVui lòng lưu lại thông tin này!`);
+            } else {
+                alert(result.message);
+            }
+            closeResetPasswordModal();
+            location.reload();
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('Có lỗi xảy ra: ' + error.message);
+    }
+});
+
+// Account actions
+async function lockAccount(accountId, username) {
+    if (!confirm(`Bạn có chắc chắn muốn khoá tài khoản "${username}"?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/accounts/lock/${accountId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(result.message);
+            location.reload();
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('Có lỗi xảy ra: ' + error.message);
+    }
+}
+
+async function unlockAccount(accountId, username) {
+    if (!confirm(`Bạn có chắc chắn muốn mở khoá tài khoản "${username}"?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/accounts/unlock/${accountId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(result.message);
+            location.reload();
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('Có lỗi xảy ra: ' + error.message);
+    }
+}
+
 async function deleteAccount(accountId, username) {
-    if (!confirm(`Bạn có chắc chắn muốn xóa tài khoản "${username}"?`)) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa tài khoản "${username}"?\n\nLưu ý: Tài khoản sẽ bị vô hiệu hóa (soft delete).`)) {
         return;
     }
     
@@ -559,14 +1046,219 @@ async function deleteAccount(accountId, username) {
     }
 }
 
-// Đóng modal khi click bên ngoài
-window.onclick = function(event) {
-    const modal = document.getElementById('addAccountModal');
-    if (event.target == modal) {
-        closeAddAccountModal();
+// Permission Management Functions
+let currentPermissionAccountId = null;
+let originalPermissions = null; // Lưu trạng thái ban đầu để hủy
+
+function openPermissionsModal(accountId, username) {
+    currentPermissionAccountId = accountId;
+    originalPermissions = null; // Reset
+    document.getElementById('permissionsModal').style.display = 'block';
+    document.getElementById('perm_username').value = username;
+    document.getElementById('permissions-loading').style.display = 'block';
+    document.getElementById('permissions-content').style.display = 'none';
+    document.getElementById('permissions-admin-notice').style.display = 'none';
+    document.getElementById('save-permissions-btn').style.display = 'block';
+    
+    // Load permissions
+    loadUserPermissions(accountId);
+}
+
+function closePermissionsModal() {
+    document.getElementById('permissionsModal').style.display = 'none';
+    currentPermissionAccountId = null;
+}
+
+async function loadUserPermissions(accountId) {
+    try {
+        const response = await fetch(`/accounts/${accountId}/permissions`);
+        const result = await response.json();
+        
+        document.getElementById('permissions-loading').style.display = 'none';
+        
+        if (result.success) {
+            if (result.data.is_admin) {
+                document.getElementById('permissions-admin-notice').style.display = 'block';
+                document.getElementById('permissions-content').style.display = 'none';
+                document.getElementById('save-permissions-btn').style.display = 'none';
+            } else {
+                document.getElementById('permissions-content').style.display = 'block';
+                renderPermissionsCheckboxes(result.data.permissions);
+            }
+        } else {
+            alert('Lỗi khi tải permissions: ' + result.message);
+        }
+    } catch (error) {
+        document.getElementById('permissions-loading').style.display = 'none';
+        alert('Có lỗi xảy ra: ' + error.message);
     }
+}
+
+function renderPermissionsCheckboxes(permissions) {
+    const container = document.getElementById('permissions-checkboxes');
+    container.innerHTML = '';
+    
+    if (permissions.length === 0) {
+        container.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 20px;">Không có permissions nào được định nghĩa.</td></tr>';
+        return;
+    }
+    
+    // Lưu trạng thái ban đầu để có thể hủy
+    originalPermissions = permissions.map(p => ({
+        id: p.id,
+        has_permission: p.has_permission
+    }));
+    
+    // Sắp xếp permissions theo tên page
+    const sortedPermissions = [...permissions].sort((a, b) => {
+        const nameA = (a.description || a.name || '').toLowerCase();
+        const nameB = (b.description || b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+    
+    // Render dạng bảng
+    sortedPermissions.forEach(perm => {
+        const row = document.createElement('tr');
+        
+        // Cột Page
+        const pageCell = document.createElement('td');
+        const pageName = document.createElement('span');
+        pageName.textContent = perm.description || perm.name;
+        pageName.style.fontWeight = '500';
+        pageName.style.color = '#2c3e50';
+        pageCell.appendChild(pageName);
+        
+        const pagePath = document.createElement('span');
+        pagePath.textContent = ` (${perm.page_path})`;
+        pagePath.style.color = '#7f8c8d';
+        pagePath.style.fontSize = '12px';
+        pageCell.appendChild(pagePath);
+        
+        // Cột Truy cập
+        const accessCell = document.createElement('td');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `perm_${perm.id}`;
+        checkbox.value = perm.id;
+        // Mặc định: nếu user chưa có permission nào, tất cả đều được tick
+        // Nếu user đã có permissions, dùng giá trị từ database
+        checkbox.checked = perm.has_permission !== false; // Mặc định true nếu undefined/null
+        checkbox.setAttribute('data-permission-id', perm.id);
+        
+        accessCell.appendChild(checkbox);
+        accessCell.style.textAlign = 'center';
+        
+        row.appendChild(pageCell);
+        row.appendChild(accessCell);
+        container.appendChild(row);
+    });
+}
+
+function cancelPermissionsChanges() {
+    if (!originalPermissions) {
+        closePermissionsModal();
+        return;
+    }
+    
+    // Khôi phục trạng thái ban đầu
+    originalPermissions.forEach(origPerm => {
+        const checkbox = document.getElementById(`perm_${origPerm.id}`);
+        if (checkbox) {
+            checkbox.checked = origPerm.has_permission !== false;
+        }
+    });
+    
+    // Đóng modal
+    closePermissionsModal();
+}
+
+async function savePermissions() {
+    if (!currentPermissionAccountId) {
+        alert('Không tìm thấy tài khoản');
+        return;
+    }
+    
+    // Lấy tất cả các checkbox (cả checked và unchecked)
+    const allCheckboxes = document.querySelectorAll('#permissions-checkboxes input[type="checkbox"]');
+    const checkedCheckboxes = document.querySelectorAll('#permissions-checkboxes input[type="checkbox"]:checked');
+    
+    // Lấy danh sách permission IDs được chọn
+    const permissionIds = Array.from(checkedCheckboxes).map(cb => {
+        const value = cb.value;
+        const parsed = parseInt(value);
+        if (isNaN(parsed)) {
+            console.error('Invalid permission ID:', value);
+            return null;
+        }
+        return parsed;
+    }).filter(id => id !== null);
+    
+    console.log('Saving permissions for user:', currentPermissionAccountId);
+    console.log('Selected permission IDs:', permissionIds);
+    console.log('Total checkboxes:', allCheckboxes.length);
+    console.log('Checked checkboxes:', checkedCheckboxes.length);
+    
+    // Disable button để tránh double submit
+    const saveBtn = document.getElementById('save-permissions-btn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang lưu...';
+    
+    try {
+        const response = await fetch(`/accounts/${currentPermissionAccountId}/permissions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                permission_ids: permissionIds
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const message = result.message || 'Đã cập nhật permissions thành công';
+            if (result.data) {
+                console.log('Permissions updated:', {
+                    deleted: result.data.deleted_count,
+                    added: result.data.added_count,
+                    total: result.data.total_permissions
+                });
+            }
+            alert(message);
+            closePermissionsModal();
+            // Reload trang để đảm bảo dữ liệu được cập nhật
+            setTimeout(() => {
+                location.reload();
+            }, 500);
+        } else {
+            alert('Lỗi: ' + (result.message || 'Không thể cập nhật permissions'));
+            console.error('Error response:', result);
+        }
+    } catch (error) {
+        console.error('Error saving permissions:', error);
+        alert('Có lỗi xảy ra: ' + error.message);
+    } finally {
+        // Restore button
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+    }
+}
+
+// Close modals when clicking outside
+window.onclick = function(event) {
+    const modals = ['addAccountModal', 'editAccountModal', 'resetPasswordModal', 'permissionsModal'];
+    modals.forEach(modalId => {
+        const modal = document.getElementById(modalId);
+        if (event.target == modal) {
+            if (modalId === 'addAccountModal') closeAddAccountModal();
+            if (modalId === 'editAccountModal') closeEditModal();
+            if (modalId === 'resetPasswordModal') closeResetPasswordModal();
+            if (modalId === 'permissionsModal') closePermissionsModal();
+        }
+    });
 }
 </script>
 </div>
 {% endblock %}
-

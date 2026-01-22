@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý vận hành - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block page_title %}Quản lý vận hành{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+    <div class="page-header">
+        <h2>⚙️ Quản lý vận hành</h2>
+        <p>Quản lý nhân viên, xe và tuyến đường trong hệ thống</p>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="operations-tabs">
+        <div class="tab-nav">
+            <button class="tab-btn active" data-tab="employees" onclick="switchTab('employees')">
+                <i class="fas fa-users"></i>
+                <span>Quản lý nhân viên</span>
+            </button>
+            <button class="tab-btn" data-tab="vehicles" onclick="switchTab('vehicles')">
+                <i class="fas fa-car"></i>
+                <span>Quản lý xe</span>
+            </button>
+            <button class="tab-btn" data-tab="routes" onclick="switchTab('routes')">
+                <i class="fas fa-route"></i>
+                <span>Quản lý tuyến đường</span>
+            </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="tab-content">
+            <div id="tab-employees" class="tab-pane active">
+                <div class="tab-iframe-container">
+                    <iframe src="/employees?embed=1" frameborder="0" class="tab-iframe"></iframe>
+                </div>
+            </div>
+            <div id="tab-vehicles" class="tab-pane">
+                <div class="tab-iframe-container">
+                    <iframe src="/vehicles?embed=1" frameborder="0" class="tab-iframe"></iframe>
+                </div>
+            </div>
+            <div id="tab-routes" class="tab-pane">
+                <div class="tab-iframe-container">
+                    <iframe src="/routes?embed=1" frameborder="0" class="tab-iframe"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.operations-tabs {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(25, 118, 210, 0.1);
+    overflow: hidden;
+}
+
+.tab-nav {
+    display: flex;
+    background: #f8f9fa;
+    border-bottom: 2px solid #e1e8ed;
+    gap: 0;
+}
+
+.tab-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+    color: #666;
+    position: relative;
+}
+
+.tab-btn:hover {
+    background: #e8f4f8;
+    color: #4a90e2;
+}
+
+.tab-btn.active {
+    background: white;
+    color: #4a90e2;
+    border-bottom-color: #4a90e2;
+    font-weight: 600;
+}
+
+.tab-btn i {
+    font-size: 16px;
+}
+
+.tab-content {
+    position: relative;
+    min-height: 600px;
+}
+
+.tab-pane {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tab-iframe-container {
+    width: 100%;
+    height: calc(100vh - 250px);
+    min-height: 600px;
+    overflow: hidden;
+}
+
+.tab-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .tab-nav {
+        flex-direction: column;
+    }
+    
+    .tab-btn {
+        padding: 12px 16px;
+        justify-content: flex-start;
+        border-bottom: 1px solid #e1e8ed;
+        border-left: 3px solid transparent;
+    }
+    
+    .tab-btn.active {
+        border-left-color: #4a90e2;
+        border-bottom-color: #e1e8ed;
+    }
+    
+    .tab-iframe-container {
+        height: calc(100vh - 300px);
+        min-height: 500px;
+    }
+}
+</style>
+
+<script>
+function switchTab(tabName) {
+    // Remove active class from all tabs and panes
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-pane').forEach(pane => {
+        pane.classList.remove('active');
+    });
+    
+    // Add active class to selected tab and pane
+    const selectedBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    const selectedPane = document.getElementById(`tab-${tabName}`);
+    
+    if (selectedBtn && selectedPane) {
+        selectedBtn.classList.add('active');
+        selectedPane.classList.add('active');
+    }
+}
+
+// Set active tab based on current URL hash
+document.addEventListener('DOMContentLoaded', function() {
+    const hash = window.location.hash;
+    if (hash) {
+        const tabName = hash.substring(1); // Remove #
+        if (['employees', 'vehicles', 'routes'].includes(tabName)) {
+            switchTab(tabName);
+        }
+    }
+});
+</script>
+{% endblock %}
+

@@ -10,15 +10,16 @@
 <body>
     <div class="app-wrapper">
         <!-- Top Color Bar -->
+        {% if not request.query_params.get('embed') %}
         <div class="top-color-bar"></div>
         
         <!-- Navigation Bar -->
         <nav class="nav-bar">
             <div class="nav-container">
                 {% if current_user %}
-                    {# Trang chủ - Chỉ Admin #}
-                    {% if current_user.role == "Admin" %}
-                    <a href="/" class="nav-card">
+                    {# Trang chủ #}
+                    {% if has_page_access(current_user.role, "/", current_user.id) %}
+                    <a href="/" class="nav-card" data-tooltip="Trang chủ">
                         <div class="nav-icon-box">
                             <i class="fas fa-home"></i>
                         </div>
@@ -26,129 +27,69 @@
                     </a>
                     {% endif %}
                     
-                    {# Quản lý nhân viên - Chỉ Admin #}
-                    {% if current_user.role == "Admin" %}
-                    <a href="/employees" class="nav-card">
+                    {# Quản lý vận hành #}
+                    {% if has_page_access(current_user.role, "/operations", current_user.id) %}
+                    <a href="/operations" class="nav-card" data-tooltip="Quản lý vận hành">
                         <div class="nav-icon-box">
-                            <i class="fas fa-users"></i>
+                            <i class="fas fa-cogs"></i>
                         </div>
-                        <span class="nav-label">Quản lý nhân viên</span>
+                        <span class="nav-label">QL Vận hành</span>
                     </a>
                     {% endif %}
                     
-                    {# Quản lý xe - Chỉ Admin #}
-                    {% if current_user.role == "Admin" %}
-                    <a href="/vehicles" class="nav-card">
-                        <div class="nav-icon-box">
-                            <i class="fas fa-car"></i>
-                        </div>
-                        <span class="nav-label">Quản lý xe</span>
-                    </a>
-                    {% endif %}
-                    
-                    {# Quản lý tuyến đường - Chỉ Admin #}
-                    {% if current_user.role == "Admin" %}
-                    <a href="/routes" class="nav-card">
-                        <div class="nav-icon-box">
-                            <i class="fas fa-route"></i>
-                        </div>
-                        <span class="nav-label">Quản lý tuyến đường</span>
-                    </a>
-                    {% endif %}
-                    
-                    {# Bảng chấm công - Ẩn, chỉ sử dụng V1 #}
-                    {# {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/daily-new" class="nav-card">
-                        <div class="nav-icon-box">
-                            <i class="fas fa-clipboard-check"></i>
-                        </div>
-                        <span class="nav-label">Bảng chấm công</span>
-                    </a>
-                    {% endif %} #}
-                    
-                    {# Bảng chấm công V1 - Admin và User #}
-                    {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/timekeeping-v1" class="nav-card">
+                    {# Bảng chấm công V1 #}
+                    {% if has_page_access(current_user.role, "/timekeeping-v1", current_user.id) %}
+                    <a href="/timekeeping-v1" class="nav-card" data-tooltip="Bảng chấm công V1">
                         <div class="nav-icon-box">
                             <i class="fas fa-calendar-check"></i>
                         </div>
-                        <span class="nav-label">Bảng chấm công V1</span>
+                        <span class="nav-label">Chấm công</span>
                     </a>
                     {% endif %}
                     
-                    {# Bảo dưỡng xe - Admin và User #}
-                    {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/maintenance" class="nav-card">
+                    {# Bảo dưỡng xe #}
+                    {% if has_page_access(current_user.role, "/maintenance", current_user.id) %}
+                    <a href="/maintenance" class="nav-card" data-tooltip="Bảo dưỡng xe">
                         <div class="nav-icon-box">
                             <i class="fas fa-wrench"></i>
                         </div>
-                        <span class="nav-label">Bảo dưỡng xe</span>
+                        <span class="nav-label">Bảo dưỡng</span>
                     </a>
                     {% endif %}
                     
-                    {# Theo dõi dầu V2 - Admin và User #}
-                    {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/theo-doi-dau-v2" class="nav-card">
+                    {# Theo dõi dầu V2 #}
+                    {% if has_page_access(current_user.role, "/theo-doi-dau-v2", current_user.id) %}
+                    <a href="/theo-doi-dau-v2" class="nav-card" data-tooltip="Theo dõi dầu V2">
                         <div class="nav-icon-box">
                             <i class="fas fa-oil-can"></i>
                         </div>
-                        <span class="nav-label">Theo dõi dầu V2</span>
+                        <span class="nav-label">Theo dõi dầu</span>
                     </a>
                     {% endif %}
                     
-                    {# Doanh thu - Ẩn, đang phát triển #}
-                    {# {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/revenue" class="nav-card">
-                        <div class="nav-icon-box">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                        <span class="nav-label">Doanh thu</span>
-                    </a>
-                    {% endif %} #}
-                    
-                    {# Bảng tính lương - Ẩn, đã thay thế bằng V2 #}
-                    {# {% if current_user.role == "Admin" %}
-                    <a href="/salary-calculation" class="nav-card">
+                    {# Bảng tính lương Ver 2.0 #}
+                    {% if has_page_access(current_user.role, "/salary-calculation-v2", current_user.id) %}
+                    <a href="/salary-calculation-v2" class="nav-card" data-tooltip="Bảng tính lương V2">
                         <div class="nav-icon-box">
                             <i class="fas fa-calculator"></i>
                         </div>
-                        <span class="nav-label">Bảng tính lương</span>
-                    </a>
-                    {% endif %} #}
-                    
-                    {# Bảng tính lương Ver 2.0 - Admin và User #}
-                    {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/salary-calculation-v2" class="nav-card">
-                        <div class="nav-icon-box">
-                            <i class="fas fa-calculator"></i>
-                        </div>
-                        <span class="nav-label">Bảng tính lương V2</span>
+                        <span class="nav-label">Tính lương</span>
                     </a>
                     {% endif %}
                     
-                    {# Báo cáo tổng hợp - Admin và User #}
-                    {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/finance-report" class="nav-card">
+                    {# Báo cáo tổng hợp #}
+                    {% if has_page_access(current_user.role, "/finance-report", current_user.id) %}
+                    <a href="/finance-report" class="nav-card" data-tooltip="Báo cáo tổng hợp">
                         <div class="nav-icon-box">
                             <i class="fas fa-file-invoice-dollar"></i>
                         </div>
-                        <span class="nav-label">Báo cáo tổng hợp</span>
+                        <span class="nav-label">Báo cáo</span>
                     </a>
                     {% endif %}
                     
-                    {# Thống kê tài chính - Ẩn, đang phát triển #}
-                    {# {% if current_user.role in ["Admin", "User"] %}
-                    <a href="/financial-statistics" class="nav-card">
-                        <div class="nav-icon-box">
-                            <i class="fas fa-chart-bar"></i>
-                        </div>
-                        <span class="nav-label">Thống kê tài chính</span>
-                    </a>
-                    {% endif %} #}
-                    
                     {# Tài khoản - Chỉ Admin #}
-                    {% if current_user.role == "Admin" %}
-                    <a href="/accounts" class="nav-card">
+                    {% if has_page_access(current_user.role, "/accounts", current_user.id) %}
+                    <a href="/accounts" class="nav-card" data-tooltip="Quản lý tài khoản">
                         <div class="nav-icon-box">
                             <i class="fas fa-user-shield"></i>
                         </div>
@@ -174,6 +115,7 @@
             </div>
             {% endif %}
         </nav>
+        {% endif %}
         
         <!-- Main Content -->
         <div class="main-content">
@@ -224,6 +166,14 @@
                     card.classList.add('active');
                 }
             });
+            
+            // Check if current page is operations page or sub-pages
+            if (currentPath === '/operations' || currentPath === '/employees' || currentPath === '/vehicles' || currentPath === '/routes') {
+                const operationsCard = document.querySelector('a[href="/operations"]');
+                if (operationsCard) {
+                    operationsCard.classList.add('active');
+                }
+            }
         });
         
         // Hiển thị toast thông báo "Đang phát triển"

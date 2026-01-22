@@ -183,6 +183,42 @@
             <h3>📋 Danh sách đổ dầu</h3>
         </div>
         
+        <!-- Bộ lọc theo tháng -->
+        <div class="month-filter-section" style="margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
+            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label for="filterMonthYear" style="font-weight: 600; color: #2c3e50;">Tháng/Năm:</label>
+                    <input type="month" id="filterMonthYear" name="month_year" value="{{ '%04d-%02d'|format(selected_year, selected_month) }}" min="2000-01" max="2100-12" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 150px;">
+                </div>
+                
+                <button type="button" class="btn btn-primary" onclick="applyMonthFilter()" style="padding: 8px 20px;">
+                    <i class="fas fa-filter"></i> Lọc
+                </button>
+                
+                <button type="button" class="btn btn-secondary" onclick="resetMonthFilter()" style="padding: 8px 20px;">
+                    <i class="fas fa-redo"></i> Reset
+                </button>
+            </div>
+        </div>
+        
+        <!-- Tổng hợp tháng -->
+        <div class="month-summary" style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: white;">
+            <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 20px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 12px; opacity: 0.9; margin-bottom: 5px;">Tháng đang xem</div>
+                    <div style="font-size: 20px; font-weight: 700;">Tháng {{ selected_month }}/{{ selected_year }}</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 12px; opacity: 0.9; margin-bottom: 5px;">Tổng số lít dầu</div>
+                    <div style="font-size: 20px; font-weight: 700;" id="summaryTotalLiters">{{ "{:,.2f}".format(total_liters) }} lít</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 12px; opacity: 0.9; margin-bottom: 5px;">Tổng số tiền dầu</div>
+                    <div style="font-size: 20px; font-weight: 700;" id="summaryTotalCost">{{ "{:,.0f}".format(total_cost) }} đ</div>
+                </div>
+            </div>
+        </div>
+        
         <div class="table-container-scroll">
             <table class="fuel-records-table" id="fuelRecordsTable">
                 <thead>
@@ -220,17 +256,17 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="8" class="text-center">Không có dữ liệu đổ dầu.</td>
+                            <td colspan="8" class="text-center">Không có dữ liệu đổ dầu trong tháng {{ selected_month }}/{{ selected_year }}.</td>
                         </tr>
                     {% endif %}
                 </tbody>
                 <tfoot id="summaryRow">
                     {% if fuel_records %}
-                    <tr class="summary-row">
-                        <td colspan="3"><strong>Tổng</strong></td>
+                    <tr class="summary-row" style="background-color: #f8f9fa; font-weight: 700;">
+                        <td colspan="3"><strong>Tổng tháng {{ selected_month }}/{{ selected_year }}</strong></td>
                         <td></td>
-                        <td class="number"><strong id="totalLiters">{{ "{:,.2f}".format(fuel_records | sum(attribute='liters_pumped')) }} lít</strong></td>
-                        <td class="number"><strong id="totalCost">{{ "{:,.0f}".format(fuel_records | sum(attribute='cost_pumped')) }} đ</strong></td>
+                        <td class="number"><strong id="totalLiters">{{ "{:,.2f}".format(total_liters) }} lít</strong></td>
+                        <td class="number"><strong id="totalCost">{{ "{:,.0f}".format(total_cost) }} đ</strong></td>
                         <td></td>
                         <td></td>
                     </tr>
@@ -736,7 +772,13 @@ async function saveBulkRecords() {
             }
             alert(message);
             closeModal();
-            await loadAllRecords();
+            // Reload dữ liệu với bộ lọc tháng/năm hiện tại (nếu có)
+            const monthYearInput = document.getElementById('filterMonthYear');
+            if (monthYearInput && monthYearInput.value) {
+                await applyMonthFilter();
+            } else {
+                await loadAllRecords();
+            }
             // Reload totals nếu đã có filter
             const fromDate = document.getElementById('filterFromDate')?.value;
             const toDate = document.getElementById('filterToDate')?.value;
@@ -799,7 +841,13 @@ async function saveRecord(event) {
         if (result.success) {
             alert(recordId ? 'Cập nhật bản ghi thành công' : 'Thêm bản ghi thành công');
             closeModal();
-            await loadAllRecords();
+            // Reload dữ liệu với bộ lọc tháng/năm hiện tại (nếu có)
+            const monthYearInput = document.getElementById('filterMonthYear');
+            if (monthYearInput && monthYearInput.value) {
+                await applyMonthFilter();
+            } else {
+                await loadAllRecords();
+            }
             // Reload totals nếu đã có filter
             const fromDate = document.getElementById('filterFromDate')?.value;
             const toDate = document.getElementById('filterToDate')?.value;
@@ -830,7 +878,13 @@ async function deleteRecord(recordId) {
         
         if (result.success) {
             alert('Xóa bản ghi thành công');
-            await loadAllRecords();
+            // Reload dữ liệu với bộ lọc tháng/năm hiện tại (nếu có)
+            const monthYearInput = document.getElementById('filterMonthYear');
+            if (monthYearInput && monthYearInput.value) {
+                await applyMonthFilter();
+            } else {
+                await loadAllRecords();
+            }
             // Reload totals nếu đã có filter
             const fromDate = document.getElementById('filterFromDate')?.value;
             const toDate = document.getElementById('filterToDate')?.value;
@@ -1270,8 +1324,16 @@ function closeDetailModal() {
     document.getElementById('detailModal').style.display = 'none';
 }
 
+// ===== BỘ LỌC THÁNG/NĂM CHO DANH SÁCH ĐỔ DẦU =====
+
+// Lưu trữ tab hiện tại
+let currentActiveTab = 'total'; // Mặc định là tab total
+
 // Chuyển đổi giữa các sheet
 function switchSheet(sheetName) {
+    // Lưu tab hiện tại
+    currentActiveTab = sheetName;
+    
     // Ẩn tất cả các sheet
     document.querySelectorAll('.sheet-content').forEach(sheet => {
         sheet.style.display = 'none';
@@ -1289,6 +1351,8 @@ function switchSheet(sheetName) {
     } else if (sheetName === 'danh-sach') {
         document.getElementById('sheetDanhSach').style.display = 'block';
         document.getElementById('tabDanhSach').classList.add('active');
+        // Không load lại dữ liệu vì đã được render từ server với filter
+        // Chỉ load nếu bảng trống (trường hợp đặc biệt)
     } else if (sheetName === 'khoan-dau') {
         document.getElementById('sheetKhoanDau').style.display = 'block';
         document.getElementById('tabKhoanDau').classList.add('active');
@@ -1297,6 +1361,148 @@ function switchSheet(sheetName) {
         document.getElementById('tabGiaDau').classList.add('active');
         loadDieselPrices();
     }
+}
+
+async function applyMonthFilter() {
+    const monthYearInput = document.getElementById('filterMonthYear');
+    const monthYear = monthYearInput.value;
+    
+    // Validate
+    if (!monthYear) {
+        alert('Vui lòng chọn tháng/năm');
+        return;
+    }
+    
+    // Lấy tab hiện tại đang mở
+    const activeTab = getCurrentActiveTab();
+    
+    try {
+        // Hiển thị loading
+        const tbody = document.getElementById('fuelRecordsBody');
+        const originalContent = tbody.innerHTML;
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">Đang tải dữ liệu...</td></tr>';
+        
+        // Gọi API để lấy dữ liệu
+        const response = await fetch(`/api/do-dau/filter-by-month?month_year=${encodeURIComponent(monthYear)}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            // Cập nhật bảng
+            renderFuelRecordsTable(data.records);
+            
+            // Cập nhật tổng hợp
+            updateMonthSummary(data.selected_month, data.selected_year, data.total_liters, data.total_cost);
+            
+            // Giữ nguyên tab hiện tại (không chuyển tab)
+            // Tab đã được giữ nguyên vì không có page reload
+        } else {
+            alert('Lỗi: ' + (data.error || 'Không thể tải dữ liệu'));
+            tbody.innerHTML = originalContent;
+        }
+    } catch (error) {
+        console.error('Error loading fuel records:', error);
+        alert('Lỗi khi tải dữ liệu');
+    }
+}
+
+function getCurrentActiveTab() {
+    // Sử dụng biến currentActiveTab đã được lưu
+    return currentActiveTab || 'total';
+}
+
+function renderFuelRecordsTable(records) {
+    const tbody = document.getElementById('fuelRecordsBody');
+    const summaryRow = document.getElementById('summaryRow');
+    
+    if (!records || records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">Không có dữ liệu đổ dầu trong tháng đã chọn.</td></tr>';
+        if (summaryRow) {
+            summaryRow.innerHTML = '';
+        }
+        return;
+    }
+    
+    // Render bảng
+    tbody.innerHTML = records.map((record, index) => {
+        return `
+            <tr data-record-id="${record.id}">
+                <td>${index + 1}</td>
+                <td>${formatDate(record.date)}</td>
+                <td><strong>${record.license_plate}</strong></td>
+                <td class="number">${formatCurrency(record.unit_price)} đ</td>
+                <td class="number">${record.liters.toFixed(2)} lít</td>
+                <td class="number"><strong>${formatCurrency(record.total_amount)} đ</strong></td>
+                <td>${record.notes || ''}</td>
+                <td class="actions">
+                    <button class="btn btn-warning btn-sm" onclick="editRecord(${record.id})" title="Sửa">
+                        ✏️ Sửa
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteRecord(${record.id})" title="Xóa">
+                        🗑️ Xóa
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    // Cập nhật allFuelRecords để các hàm khác có thể sử dụng
+    allFuelRecords = records.map(r => ({
+        id: r.id,
+        date: r.date,
+        license_plate: r.license_plate,
+        unit_price: r.unit_price,
+        liters: r.liters,
+        total_amount: r.total_amount,
+        notes: r.notes
+    }));
+}
+
+function updateMonthSummary(month, year, totalLiters, totalCost) {
+    // Cập nhật phần tổng hợp tháng
+    const summaryMonthEl = document.querySelector('.month-summary div:first-child div:last-child');
+    if (summaryMonthEl) {
+        summaryMonthEl.textContent = `Tháng ${month}/${year}`;
+    }
+    
+    // Cập nhật tổng số lít
+    const totalLitersEl = document.getElementById('summaryTotalLiters');
+    if (totalLitersEl) {
+        totalLitersEl.textContent = `${totalLiters.toFixed(2)} lít`;
+    }
+    
+    // Cập nhật tổng số tiền
+    const totalCostEl = document.getElementById('summaryTotalCost');
+    if (totalCostEl) {
+        totalCostEl.textContent = `${formatCurrency(totalCost)} đ`;
+    }
+    
+    // Cập nhật footer của bảng
+    const summaryRow = document.getElementById('summaryRow');
+    if (summaryRow) {
+        summaryRow.innerHTML = `
+            <tr class="summary-row" style="background-color: #f8f9fa; font-weight: 700;">
+                <td colspan="3"><strong>Tổng tháng ${month}/${year}</strong></td>
+                <td></td>
+                <td class="number"><strong id="totalLiters">${totalLiters.toFixed(2)} lít</strong></td>
+                <td class="number"><strong id="totalCost">${formatCurrency(totalCost)} đ</strong></td>
+                <td></td>
+                <td></td>
+            </tr>
+        `;
+    }
+}
+
+function resetMonthFilter() {
+    // Reset về tháng hiện tại
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const monthYear = `${year}-${month}`;
+    
+    document.getElementById('filterMonthYear').value = monthYear;
+    
+    // Áp dụng filter
+    applyMonthFilter();
 }
 
 // ===== GIÁ DẦU FUNCTIONS =====
@@ -1493,8 +1699,9 @@ async function savePrice(event) {
 
 // Khởi tạo khi trang được load
 document.addEventListener('DOMContentLoaded', function() {
-    // Load dữ liệu ban đầu
-    loadAllRecords();
+    // KHÔNG load lại dữ liệu vì đã được render từ server với filter tháng/năm
+    // Chỉ load khi thực sự cần (ví dụ khi thêm/sửa/xóa từ các tab khác)
+    // loadAllRecords(); // Đã comment để tránh ghi đè dữ liệu đã được filter
     
     // Khởi tạo giá trị mặc định cho bộ lọc Total
     const filterFromDate = document.getElementById('filterFromDate');
@@ -1515,8 +1722,17 @@ document.addEventListener('DOMContentLoaded', function() {
         quotaToDate.value = getLastDayOfMonth();
     }
     
-    // Đảm bảo sheet Total được hiển thị mặc định
+    // Đảm bảo sheet Total được hiển thị mặc định và cập nhật currentActiveTab
     switchSheet('total');
+    
+    // Đảm bảo month picker có giá trị mặc định là tháng hiện tại nếu chưa có
+    const monthYearInput = document.getElementById('filterMonthYear');
+    if (monthYearInput && !monthYearInput.value) {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        monthYearInput.value = `${year}-${month}`;
+    }
 });
 </script>
 

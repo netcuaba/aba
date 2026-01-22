@@ -82,10 +82,51 @@ def safe_getattr(value, attr_name=''):
     except (AttributeError, TypeError, Exception):
         return ''
 
-# Đăng ký filters
+# Custom filter để convert UTC time sang UTC+7 (Bangkok, Hanoi, Jakarta)
+def to_local_time(utc_datetime):
+    """Convert UTC datetime sang UTC+7 và format thành dd/mm/yyyy HH:MM
+    Usage trong template: {{ account.last_login|to_local_time }}
+    """
+    if utc_datetime is None:
+        return 'Chưa đăng nhập'
+    
+    try:
+        from datetime import timedelta
+        # Thêm 7 giờ vào UTC time
+        local_time = utc_datetime + timedelta(hours=7)
+        # Format thành dd/mm/yyyy HH:MM
+        return local_time.strftime('%d/%m/%Y %H:%M')
+    except (AttributeError, TypeError, Exception) as e:
+        # Fallback về format mặc định nếu có lỗi
+        try:
+            return utc_datetime.strftime('%d/%m/%Y %H:%M')
+        except:
+            return str(utc_datetime)
+
+# Helper function để kiểm tra quyền trong template
+def has_page_access(role: str, page_path: str, user_id: Optional[int] = None) -> bool:
+    """Helper function để kiểm tra quyền trong template (không có db, chỉ dùng cho menu)"""
+    # Admin có quyền truy cập tất cả
+    if role == "Admin":
+        return True
+    
+    # Fallback về logic cũ cho menu (không có db trong template context)
+    if role == "Manager":
+        restricted_pages = ["/accounts"]
+        return page_path not in restricted_pages
+    
+    if role == "User":
+        allowed_pages = ["/daily-new", "/revenue", "/financial-statistics", "/timekeeping-v1", "/salary-calculation-v2", "/login", "/logout", "/maintenance", "/theo-doi-dau-v2"]
+        return page_path in allowed_pages
+    
+    return False
+
+# Đăng ký filters và global functions
 templates.env.filters["from_json"] = from_json
 templates.env.filters["tojson"] = tojson
 templates.env.filters["safe_getattr"] = safe_getattr
+templates.env.filters["to_local_time"] = to_local_time
+templates.env.globals["has_page_access"] = has_page_access
 
 # Models
 class Employee(Base):
@@ -316,9 +357,74 @@ class Account(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, nullable=False)  # Tên đăng nhập
     password = Column(String, nullable=False)  # Mật khẩu (lưu dạng plain text, có thể hash sau)
-    role = Column(String, default="User")  # Phân quyền: Admin, User, Guest
+    full_name = Column(String)  # Họ tên
+    email = Column(String)  # Email
+    phone = Column(String)  # Số điện thoại
+    role = Column(String, default="User")  # Phân quyền: Admin, Manager, User
+    status = Column(String, default="Active")  # Trạng thái: Active, Inactive
+    is_locked = Column(Integer, default=0)  # 0: Mở, 1: Khoá
+    locked_at = Column(DateTime, nullable=True)  # Thời điểm khoá
+    locked_by = Column(Integer, ForeignKey("accounts.id"), nullable=True)  # Ai khoá
+    last_login = Column(DateTime, nullable=True)  # Lần đăng nhập cuối
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    locker = relationship("Account", remote_side=[id], foreign_keys=[locked_by])
+
+class Permission(Base):
+    """Bảng quản lý quyền truy cập"""
+    __tablename__ = "permissions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)  # Tên quyền (VD: employees.view, employees.create)
+    description = Column(String)  # Mô tả quyền
+    page_path = Column(String)  # Đường dẫn page (VD: /employees)
+    action = Column(String)  # Hành động: view, create, edit, delete
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class RolePermission(Base):
+    """Bảng mapping quyền cho vai trò"""
+    __tablename__ = "role_permissions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    role = Column(String, nullable=False)  # Vai trò: Admin, Manager, User
+    permission_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    permission = relationship("Permission")
+
+class UserPermission(Base):
+    """Bảng mapping quyền cho từng user cụ thể"""
+    __tablename__ = "user_permissions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    permission_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("Account", foreign_keys=[user_id])
+    permission = relationship("Permission")
+
+class AuditLog(Base):
+    """Bảng nhật ký hệ thống - ghi lại mọi thay đổi"""
+    __tablename__ = "audit_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)  # Người thực hiện
+    action = Column(String, nullable=False)  # Hành động: create, update, delete, lock, unlock, reset_password
+    entity_type = Column(String, nullable=False)  # Loại entity: account, permission, etc.
+    entity_id = Column(Integer, nullable=True)  # ID của entity bị thay đổi
+    old_values = Column(String)  # Giá trị cũ (JSON)
+    new_values = Column(String)  # Giá trị mới (JSON)
+    description = Column(String)  # Mô tả chi tiết
+    ip_address = Column(String)  # IP address
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("Account", foreign_keys=[user_id])
 
 class TimekeepingTable(Base):
     """Bảng quản lý bảng chấm công V1"""
@@ -376,6 +482,65 @@ class RoutePrice(Base):
 
 # Tạo bảng
 Base.metadata.create_all(bind=engine)
+
+# Migration: Thêm các cột mới vào bảng accounts nếu chưa có
+def migrate_accounts():
+    """Thêm các cột mới vào bảng accounts nếu chưa có"""
+    from sqlalchemy import inspect, text
+    
+    try:
+        inspector = inspect(engine)
+        # Kiểm tra xem bảng có tồn tại không
+        if 'accounts' not in inspector.get_table_names():
+            print("Table accounts does not exist yet, will be created by create_all")
+            return
+        
+        existing_columns = [col['name'] for col in inspector.get_columns('accounts')]
+        
+        with engine.connect() as conn:
+            # Thêm các cột mới nếu chưa có
+            if 'full_name' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN full_name VARCHAR"))
+                print("Added column full_name to accounts table")
+            
+            if 'email' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN email VARCHAR"))
+                print("Added column email to accounts table")
+            
+            if 'phone' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN phone VARCHAR"))
+                print("Added column phone to accounts table")
+            
+            if 'status' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN status VARCHAR DEFAULT 'Active'"))
+                # Cập nhật các record cũ thành Active
+                conn.execute(text("UPDATE accounts SET status = 'Active' WHERE status IS NULL"))
+                conn.commit()
+                print("Added column status to accounts table")
+            
+            if 'is_locked' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN is_locked INTEGER DEFAULT 0"))
+                print("Added column is_locked to accounts table")
+            
+            if 'locked_at' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN locked_at DATETIME"))
+                print("Added column locked_at to accounts table")
+            
+            if 'locked_by' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN locked_by INTEGER"))
+                print("Added column locked_by to accounts table")
+            
+            if 'last_login' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN last_login DATETIME"))
+                print("Added column last_login to accounts table")
+            
+            conn.commit()
+            
+    except Exception as e:
+        print(f"Migration error for accounts: {e}")
+
+# Chạy migration
+migrate_accounts()
 
 # Migration: Thêm các cột mới vào bảng revenue_records nếu chưa có
 def migrate_revenue_records():
@@ -868,19 +1033,146 @@ def require_user_or_admin(current_user = Depends(require_auth)):
     return current_user
 
 # Helper function để check user có quyền truy cập trang không
-def check_page_access(role: str, page_path: str) -> bool:
+def check_page_access(role: str, page_path: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> bool:
     """Kiểm tra user có quyền truy cập trang không"""
     # Admin có quyền truy cập tất cả
     if role == "Admin":
         return True
     
-    # User chỉ được truy cập daily-new, revenue, financial-statistics và timekeeping-v1
-    if role == "User":
-        allowed_pages = ["/daily-new", "/revenue", "/financial-statistics", "/timekeeping-v1", "/salary-calculation-v2", "/login", "/logout"]
-        return page_path in allowed_pages
+    # Nếu không có db hoặc user_id, fallback về logic cũ
+    if not db or not user_id:
+        # Manager có quyền truy cập hầu hết các trang (trừ accounts)
+        if role == "Manager":
+            restricted_pages = ["/accounts"]
+            return page_path not in restricted_pages
+        
+        # User chỉ được truy cập một số trang nhất định
+        if role == "User":
+            allowed_pages = ["/daily-new", "/revenue", "/financial-statistics", "/timekeeping-v1", "/salary-calculation-v2", "/login", "/logout", "/maintenance", "/theo-doi-dau-v2"]
+            return page_path in allowed_pages
+        
+        return False
+    
+    # Kiểm tra quyền từ database
+    # Tìm permission cho page_path này
+    permission = db.query(Permission).filter(Permission.page_path == page_path).first()
+    if not permission:
+        # Nếu không có permission được định nghĩa, cho phép truy cập (backward compatibility)
+        return True
+    
+    # Kiểm tra xem user có quyền này không
+    user_permission = db.query(UserPermission).filter(
+        UserPermission.user_id == user_id,
+        UserPermission.permission_id == permission.id
+    ).first()
+    
+    if user_permission:
+        return True
     
     # Guest không có quyền truy cập
     return False
+
+# Helper function để kiểm tra và redirect nếu không có quyền
+def check_and_redirect_access(role: str, page_path: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> Optional[RedirectResponse]:
+    """Kiểm tra quyền và trả về RedirectResponse nếu không có quyền"""
+    if not check_page_access(role, page_path, user_id, db):
+        return RedirectResponse(url="/access-denied", status_code=303)
+    return None
+
+# Helper function để lấy IP address từ request
+def get_client_ip(request: Request) -> str:
+    """Lấy IP address của client"""
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+# Helper function để tạo audit log
+def create_audit_log(
+    db: Session,
+    user_id: int,
+    action: str,
+    entity_type: str,
+    entity_id: Optional[int] = None,
+    old_values: Optional[dict] = None,
+    new_values: Optional[dict] = None,
+    description: Optional[str] = None,
+    ip_address: Optional[str] = None
+):
+    """Tạo audit log entry"""
+    import json
+    audit_log = AuditLog(
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        old_values=json.dumps(old_values, ensure_ascii=False, default=str) if old_values else None,
+        new_values=json.dumps(new_values, ensure_ascii=False, default=str) if new_values else None,
+        description=description,
+        ip_address=ip_address
+    )
+    db.add(audit_log)
+    db.commit()
+
+# Helper function để khởi tạo permissions cho tất cả các pages
+def initialize_permissions(db: Session):
+    """Khởi tạo permissions cho tất cả các pages trong hệ thống"""
+    # Danh sách các pages và mô tả
+    pages = [
+        {"path": "/", "name": "home.view", "description": "Trang chủ", "action": "view"},
+        {"path": "/operations", "name": "operations.view", "description": "Quản lý vận hành", "action": "view"},
+        {"path": "/employees", "name": "employees.view", "description": "Quản lý nhân viên", "action": "view"},
+        {"path": "/vehicles", "name": "vehicles.view", "description": "Quản lý xe", "action": "view"},
+        {"path": "/routes", "name": "routes.view", "description": "Quản lý tuyến", "action": "view"},
+        {"path": "/maintenance", "name": "maintenance.view", "description": "Bảo dưỡng xe", "action": "view"},
+        {"path": "/theo-doi-dau-v2", "name": "fuel.view", "description": "Theo dõi dầu", "action": "view"},
+        {"path": "/revenue", "name": "revenue.view", "description": "Doanh thu", "action": "view"},
+        {"path": "/daily-new", "name": "daily.view", "description": "Chấm công hàng ngày", "action": "view"},
+        {"path": "/timekeeping-v1", "name": "timekeeping.view", "description": "Bảng chấm công V1", "action": "view"},
+        {"path": "/salary-calculation-v2", "name": "salary.view", "description": "Tính lương", "action": "view"},
+        {"path": "/finance-report", "name": "finance.view", "description": "Báo cáo tài chính", "action": "view"},
+        {"path": "/financial-statistics", "name": "statistics.view", "description": "Thống kê tài chính", "action": "view"},
+        {"path": "/accounts", "name": "accounts.view", "description": "Quản lý tài khoản", "action": "view"},
+    ]
+    
+    for page in pages:
+        # Kiểm tra xem permission đã tồn tại chưa
+        existing = db.query(Permission).filter(Permission.page_path == page["path"]).first()
+        if not existing:
+            permission = Permission(
+                name=page["name"],
+                description=page["description"],
+                page_path=page["path"],
+                action=page["action"]
+            )
+            db.add(permission)
+    
+    db.commit()
+    print("Permissions initialized successfully")
+
+# Helper function để generate password tự động
+def generate_password(length: int = 12) -> str:
+    """Tạo mật khẩu tự động"""
+    import random
+    import string
+    # Bao gồm: chữ hoa, chữ thường, số
+    uppercase = string.ascii_uppercase
+    lowercase = string.ascii_lowercase
+    digits = string.digits
+    all_chars = uppercase + lowercase + digits
+    
+    # Đảm bảo có ít nhất 1 ký tự mỗi loại
+    password = [
+        random.choice(uppercase),
+        random.choice(lowercase),
+        random.choice(digits)
+    ]
+    
+    # Thêm các ký tự ngẫu nhiên
+    password.extend(random.choice(all_chars) for _ in range(length - 3))
+    
+    # Xáo trộn
+    random.shuffle(password)
+    return ''.join(password)
 
 # FastAPI app
 app = FastAPI(title="Hệ thống quản lý vận chuyển")
@@ -888,8 +1180,116 @@ app = FastAPI(title="Hệ thống quản lý vận chuyển")
 # Thêm SessionMiddleware để quản lý session
 app.add_middleware(SessionMiddleware, secret_key="your-secret-key-change-in-production")
 
+# ==================== FILE UPLOAD HELPER FUNCTIONS ====================
+# Cấu trúc thư mục ảnh: Picture/{category}/{subcategory}/
+PICTURE_BASE_DIR = "Picture"
+
+def ensure_directory_exists(directory_path: str):
+    """Đảm bảo thư mục tồn tại, nếu chưa thì tạo"""
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path, exist_ok=True)
+    return directory_path
+
+def save_uploaded_file(
+    file: UploadFile,
+    category: str,
+    subcategory: str,
+    entity_id: str,
+    entity_type: str = "vehicle"
+) -> str:
+    """
+    Lưu file upload với cấu trúc thư mục mới
+    
+    Args:
+        file: UploadFile object
+        category: Loại nghiệp vụ (vehicles, employees, maintenance, fuel, tires, other)
+        subcategory: Thư mục con (registration, insurance, vehicle_photos, etc.)
+        entity_id: ID của entity (license_plate cho vehicle, id cho employee, etc.)
+        entity_type: Loại entity (vehicle, employee, etc.)
+    
+    Returns:
+        str: Relative path từ root project (ví dụ: Picture/vehicles/registration/vehicle_50H14740_20260122103015.jpg)
+    """
+    # Validate file
+    if not file or not file.filename:
+        raise ValueError("File không hợp lệ")
+    
+    # Validate file extension
+    allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif']
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    if file_extension not in allowed_extensions:
+        raise ValueError(f"File extension không được phép: {file_extension}")
+    
+    # Tạo tên file mới: {entity}_{id}_{yyyyMMddHHmmss}.{ext}
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    # Sanitize entity_id để tránh ký tự đặc biệt trong tên file
+    safe_entity_id = re.sub(r'[^\w\-]', '_', str(entity_id))
+    new_filename = f"{entity_type}_{safe_entity_id}_{timestamp}{file_extension}"
+    
+    # Tạo đường dẫn thư mục
+    directory_path = os.path.join(PICTURE_BASE_DIR, category, subcategory)
+    ensure_directory_exists(directory_path)
+    
+    # Đường dẫn đầy đủ để lưu file
+    full_file_path = os.path.join(directory_path, new_filename)
+    
+    # Lưu file (sử dụng absolute path để đảm bảo)
+    abs_file_path = os.path.abspath(full_file_path)
+    abs_dir_path = os.path.dirname(abs_file_path)
+    ensure_directory_exists(abs_dir_path)
+    
+    # Đọc và lưu file
+    # Note: file.file.read() sẽ đọc toàn bộ nội dung vào memory
+    # Đối với file lớn có thể cần stream, nhưng với ảnh thông thường thì OK
+    try:
+        with open(abs_file_path, "wb") as buffer:
+            content = file.file.read()
+            buffer.write(content)
+            file.file.seek(0)  # Reset file pointer để có thể đọc lại nếu cần
+    except Exception as e:
+        raise Exception(f"Lỗi khi lưu file: {str(e)}")
+    
+    # Trả về relative path từ root project
+    return full_file_path.replace("\\", "/")  # Normalize path separators
+
+def get_file_url(file_path: str) -> str:
+    """
+    Chuyển đổi file path trong DB thành URL để hiển thị
+    
+    Args:
+        file_path: Path từ DB (ví dụ: Picture/vehicles/registration/vehicle_50H14740_20260122103015.jpg)
+    
+    Returns:
+        str: URL để truy cập file (ví dụ: /Picture/vehicles/registration/vehicle_50H14740_20260122103015.jpg)
+    """
+    if not file_path:
+        return ""
+    # Normalize path và đảm bảo bắt đầu với /
+    normalized_path = file_path.replace("\\", "/")
+    if not normalized_path.startswith("/"):
+        normalized_path = "/" + normalized_path
+    return normalized_path
+
+def delete_file_if_exists(file_path: str):
+    """Xóa file vật lý nếu tồn tại"""
+    if file_path:
+        # Nếu là relative path, chuyển thành absolute
+        if not os.path.isabs(file_path):
+            abs_path = os.path.abspath(file_path)
+        else:
+            abs_path = file_path
+        
+        if os.path.exists(abs_path):
+            try:
+                os.remove(abs_path)
+            except Exception as e:
+                print(f"Lỗi khi xóa file {abs_path}: {e}")
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount Picture directory để truy cập ảnh
+ensure_directory_exists(PICTURE_BASE_DIR)
+app.mount("/Picture", StaticFiles(directory=PICTURE_BASE_DIR), name="picture")
 
 # Templates đã được tạo ở trên với custom filters
 
@@ -925,6 +1325,24 @@ async def login(
             "error": "Sai tài khoản hoặc mật khẩu"
         })
     
+    # Kiểm tra tài khoản có bị khoá không
+    if account.is_locked == 1:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Tài khoản đã bị khoá. Vui lòng liên hệ quản trị viên."
+        })
+    
+    # Kiểm tra trạng thái
+    if account.status != "Active":
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên."
+        })
+    
+    # Cập nhật last_login
+    account.last_login = datetime.utcnow()
+    db.commit()
+    
     # Lưu thông tin vào session
     request.session["user_id"] = account.id
     request.session["username"] = account.username
@@ -939,6 +1357,14 @@ async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
+@app.get("/access-denied", response_class=HTMLResponse)
+async def access_denied_page(request: Request, current_user = Depends(get_current_user)):
+    """Trang thông báo không có quyền truy cập"""
+    return templates.TemplateResponse("access_denied.html", {
+        "request": request,
+        "current_user": current_user
+    })
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # Nếu chưa đăng nhập, redirect về trang login
@@ -946,9 +1372,9 @@ async def home(request: Request, db: Session = Depends(get_db), current_user = D
         return RedirectResponse(url="/login", status_code=303)
     
     # Kiểm tra quyền truy cập
-    if not check_page_access(current_user["role"], "/"):
-        # User không được phép truy cập trang chủ, redirect về daily-new
-        return RedirectResponse(url="/daily-new", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     # Lấy thống kê tổng quan
     employees_count = db.query(Employee).count()
@@ -1055,22 +1481,34 @@ async def get_employee_documents(employee_id: int, db: Session = Depends(get_db)
         # Kiểm tra file tồn tại
         existing_documents = []
         for doc in documents:
-            file_path = f"static/uploads/{doc}"
+            # Hỗ trợ cả path cũ (static/uploads/) và path mới (Picture/...)
+            if doc.startswith("Picture/"):
+                # Path mới - sử dụng trực tiếp
+                file_path = doc
+                file_url = get_file_url(doc)
+            else:
+                # Path cũ - giữ nguyên để backward compatibility
+                file_path = f"static/uploads/{doc}"
+                file_url = f"/static/uploads/{doc}"
+            
             if os.path.exists(file_path):
                 file_size = os.path.getsize(file_path)
                 file_extension = os.path.splitext(doc)[1].lower()
+                filename = os.path.basename(doc) if "/" in doc else doc
                 existing_documents.append({
-                    "filename": doc,
-                    "url": f"/static/uploads/{doc}",
+                    "filename": filename,
+                    "url": file_url,
                     "size": file_size,
                     "extension": file_extension,
                     "exists": True
                 })
             else:
+                filename = os.path.basename(doc) if "/" in doc else doc
                 existing_documents.append({
-                    "filename": doc,
-                    "url": f"/static/uploads/{doc}",
-                    "exists": False
+                    "filename": filename,
+                    "url": file_url,
+                    "exists": False,
+                    "error": "File không tồn tại trên server"
                 })
         
         return JSONResponse(
@@ -1140,33 +1578,6 @@ async def add_employee(
     if license_expiry:
         license_expiry_date = datetime.strptime(license_expiry, "%Y-%m-%d").date()
     
-    # Handle multiple file uploads
-    documents_paths = []
-    if documents:
-        for document in documents:
-            if document and document.filename:
-                # Validate file type
-                allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif']
-                file_extension = os.path.splitext(document.filename)[1].lower()
-                
-                if file_extension not in allowed_extensions:
-                    continue  # Skip invalid files
-                
-                # Create unique filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}_{document.filename}"
-                file_path = f"static/uploads/{filename}"
-                
-                # Save file
-                with open(file_path, "wb") as buffer:
-                    content = await document.read()
-                    buffer.write(content)
-                
-                documents_paths.append(filename)
-    
-    # Convert documents list to JSON string
-    documents_json = json.dumps(documents_paths) if documents_paths else None
-    
     # Parse social_insurance_salary (must be positive integer or None)
     social_insurance_salary_int = None
     if social_insurance_salary and social_insurance_salary.strip():
@@ -1178,6 +1589,7 @@ async def add_employee(
             # Invalid input, will be None
             pass
     
+    # Tạo employee trước để có ID
     employee = Employee(
         name=name,
         birth_date=birth_date_obj,
@@ -1190,9 +1602,34 @@ async def add_employee(
         employee_status=employee_status,
         position=position,
         social_insurance_salary=social_insurance_salary_int,
-        documents=documents_json
+        documents=None  # Tạm thời để None, sẽ cập nhật sau
     )
     db.add(employee)
+    db.flush()  # Lấy ID mà không commit
+    
+    # Handle multiple file uploads - sau khi có employee ID
+    documents_paths = []
+    if documents:
+        for document in documents:
+            if document and document.filename:
+                try:
+                    # Sử dụng helper function để lưu file với cấu trúc mới
+                    file_path = save_uploaded_file(
+                        file=document,
+                        category="employees",
+                        subcategory="documents",
+                        entity_id=str(employee.id),
+                        entity_type="employee"
+                    )
+                    documents_paths.append(file_path)
+                except Exception as e:
+                    print(f"Lỗi khi lưu file giấy tờ nhân viên: {e}")
+                    continue  # Skip file nếu có lỗi
+    
+    # Convert documents list to JSON string và cập nhật employee
+    documents_json = json.dumps(documents_paths) if documents_paths else None
+    employee.documents = documents_json
+    
     db.commit()
     return RedirectResponse(url="/employees", status_code=303)
 
@@ -1254,27 +1691,32 @@ async def edit_employee(
         documents_paths = []
         for document in documents:
             if document and document.filename:
-                # Validate file type
-                allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif']
-                file_extension = os.path.splitext(document.filename)[1].lower()
-                
-                if file_extension not in allowed_extensions:
-                    continue  # Skip invalid files
-                
-                # Create unique filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}_{document.filename}"
-                file_path = f"static/uploads/{filename}"
-                
-                # Save file
-                with open(file_path, "wb") as buffer:
-                    content = await document.read()
-                    buffer.write(content)
-                
-                documents_paths.append(filename)
+                try:
+                    # Sử dụng helper function để lưu file với cấu trúc mới
+                    file_path = save_uploaded_file(
+                        file=document,
+                        category="employees",
+                        subcategory="documents",
+                        entity_id=str(employee.id),
+                        entity_type="employee"
+                    )
+                    documents_paths.append(file_path)
+                except Exception as e:
+                    print(f"Lỗi khi lưu file giấy tờ nhân viên: {e}")
+                    continue  # Skip file nếu có lỗi
         
         if documents_paths:
-            employee.documents = json.dumps(documents_paths)
+            # Get existing documents and append new ones
+            existing_documents = []
+            if employee.documents:
+                try:
+                    existing_documents = json.loads(employee.documents)
+                except json.JSONDecodeError:
+                    existing_documents = []
+            
+            # Combine existing and new documents
+            all_documents = existing_documents + documents_paths
+            employee.documents = json.dumps(all_documents)
     
     # Update employee data
     employee.name = name
@@ -1330,24 +1772,32 @@ async def delete_employee_document(
         import json
         documents = json.loads(employee.documents)
         
-        # Kiểm tra file có tồn tại trong danh sách không
-        if filename not in documents:
+        # Tìm file trong danh sách (có thể là filename hoặc full path)
+        file_to_remove = None
+        for doc in documents:
+            # So sánh với filename hoặc basename của path
+            doc_basename = os.path.basename(doc) if "/" in doc else doc
+            if doc == filename or doc_basename == filename:
+                file_to_remove = doc
+                break
+        
+        if not file_to_remove:
             return JSONResponse(
                 status_code=400,
                 content={"success": False, "error": "File không tồn tại trong danh sách giấy tờ"}
             )
         
         # Xóa file khỏi thư mục lưu trữ
-        file_path = f"static/uploads/{filename}"
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                # Log lỗi nhưng vẫn tiếp tục xóa khỏi DB
-                print(f"Lỗi khi xóa file {file_path}: {str(e)}")
+        # Hỗ trợ cả path cũ và mới
+        if file_to_remove.startswith("Picture/"):
+            file_path = file_to_remove
+        else:
+            file_path = f"static/uploads/{file_to_remove}"
+        
+        delete_file_if_exists(file_path)
         
         # Xóa file khỏi danh sách trong DB
-        documents.remove(filename)
+        documents.remove(file_to_remove)
         
         if documents:
             # Còn giấy tờ khác, cập nhật danh sách
@@ -1445,29 +1895,24 @@ async def add_vehicle(
         except ValueError:
             pass
     
-    # Handle multiple file uploads
+    # Handle multiple file uploads - Sổ đăng kiểm
     documents_paths = []
     if inspection_documents:
         for document in inspection_documents:
             if document and document.filename:
-                # Validate file type
-                allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif']
-                file_extension = os.path.splitext(document.filename)[1].lower()
-                
-                if file_extension not in allowed_extensions:
-                    continue  # Skip invalid files
-                
-                # Create unique filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}_{document.filename}"
-                file_path = f"static/uploads/{filename}"
-                
-                # Save file
-                with open(file_path, "wb") as buffer:
-                    content = await document.read()
-                    buffer.write(content)
-                
-                documents_paths.append(filename)
+                try:
+                    # Sử dụng helper function để lưu file với cấu trúc mới
+                    file_path = save_uploaded_file(
+                        file=document,
+                        category="vehicles",
+                        subcategory="registration",
+                        entity_id=license_plate,
+                        entity_type="vehicle"
+                    )
+                    documents_paths.append(file_path)
+                except Exception as e:
+                    print(f"Lỗi khi lưu file sổ đăng kiểm: {e}")
+                    continue  # Skip file nếu có lỗi
     
     # Convert documents list to JSON string
     documents_json = json.dumps(documents_paths) if documents_paths else None
@@ -1485,24 +1930,19 @@ async def add_vehicle(
     if phu_hieu_files:
         for document in phu_hieu_files:
             if document and document.filename:
-                # Validate file type
-                allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif']
-                file_extension = os.path.splitext(document.filename)[1].lower()
-                
-                if file_extension not in allowed_extensions:
-                    continue  # Skip invalid files
-                
-                # Create unique filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}_{document.filename}"
-                file_path = f"static/uploads/{filename}"
-                
-                # Save file
-                with open(file_path, "wb") as buffer:
-                    content = await document.read()
-                    buffer.write(content)
-                
-                phu_hieu_paths.append(filename)
+                try:
+                    # Sử dụng helper function để lưu file với cấu trúc mới
+                    file_path = save_uploaded_file(
+                        file=document,
+                        category="vehicles",
+                        subcategory="insurance",
+                        entity_id=license_plate,
+                        entity_type="vehicle"
+                    )
+                    phu_hieu_paths.append(file_path)
+                except Exception as e:
+                    print(f"Lỗi khi lưu file phù hiệu vận tải: {e}")
+                    continue  # Skip file nếu có lỗi
     
     # Convert phù hiệu files list to JSON string
     phu_hieu_json = json.dumps(phu_hieu_paths) if phu_hieu_paths else None
@@ -1568,24 +2008,19 @@ async def edit_vehicle(
         documents_paths = []
         for document in inspection_documents:
             if document and document.filename:
-                # Validate file type
-                allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif']
-                file_extension = os.path.splitext(document.filename)[1].lower()
-                
-                if file_extension not in allowed_extensions:
-                    continue  # Skip invalid files
-                
-                # Create unique filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}_{document.filename}"
-                file_path = f"static/uploads/{filename}"
-                
-                # Save file
-                with open(file_path, "wb") as buffer:
-                    content = await document.read()
-                    buffer.write(content)
-                
-                documents_paths.append(filename)
+                try:
+                    # Sử dụng helper function để lưu file với cấu trúc mới
+                    file_path = save_uploaded_file(
+                        file=document,
+                        category="vehicles",
+                        subcategory="registration",
+                        entity_id=vehicle.license_plate,
+                        entity_type="vehicle"
+                    )
+                    documents_paths.append(file_path)
+                except Exception as e:
+                    print(f"Lỗi khi lưu file sổ đăng kiểm: {e}")
+                    continue  # Skip file nếu có lỗi
         
         if documents_paths:
             # Get existing documents and append new ones
@@ -1613,24 +2048,19 @@ async def edit_vehicle(
         phu_hieu_paths = []
         for document in phu_hieu_files:
             if document and document.filename:
-                # Validate file type
-                allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif']
-                file_extension = os.path.splitext(document.filename)[1].lower()
-                
-                if file_extension not in allowed_extensions:
-                    continue  # Skip invalid files
-                
-                # Create unique filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}_{document.filename}"
-                file_path = f"static/uploads/{filename}"
-                
-                # Save file
-                with open(file_path, "wb") as buffer:
-                    content = await document.read()
-                    buffer.write(content)
-                
-                phu_hieu_paths.append(filename)
+                try:
+                    # Sử dụng helper function để lưu file với cấu trúc mới
+                    file_path = save_uploaded_file(
+                        file=document,
+                        category="vehicles",
+                        subcategory="insurance",
+                        entity_id=vehicle.license_plate,
+                        entity_type="vehicle"
+                    )
+                    phu_hieu_paths.append(file_path)
+                except Exception as e:
+                    print(f"Lỗi khi lưu file phù hiệu vận tải: {e}")
+                    continue  # Skip file nếu có lỗi
         
         if phu_hieu_paths:
             # Get existing phù hiệu files and append new ones
@@ -1666,6 +2096,10 @@ async def get_vehicle_documents(vehicle_id: int, db: Session = Depends(get_db)):
             content={"success": False, "error": "Không tìm thấy xe"}
         )
     
+    # Log thông tin xe để debug
+    print(f"DEBUG: Vehicle ID: {vehicle_id}, License Plate: {vehicle.license_plate}")
+    print(f"DEBUG: inspection_documents value: {vehicle.inspection_documents}")
+    
     if not vehicle.inspection_documents:
         return JSONResponse(
             status_code=200,
@@ -1675,28 +2109,58 @@ async def get_vehicle_documents(vehicle_id: int, db: Session = Depends(get_db)):
     try:
         import json
         documents = json.loads(vehicle.inspection_documents)
+        print(f"DEBUG: Parsed documents: {documents}")
         
         # Kiểm tra file tồn tại
         existing_documents = []
         for doc in documents:
-            file_path = f"static/uploads/{doc}"
-            if os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-                file_extension = os.path.splitext(doc)[1].lower()
-                existing_documents.append({
-                    "filename": doc,
-                    "url": f"/static/uploads/{doc}",
-                    "size": file_size,
-                    "extension": file_extension,
-                    "exists": True
-                })
+            # Hỗ trợ cả path cũ (static/uploads/) và path mới (Picture/...)
+            if doc.startswith("Picture/"):
+                # Path mới - sử dụng trực tiếp
+                file_path = doc
+                file_url = get_file_url(doc)
             else:
+                # Path cũ - giữ nguyên để backward compatibility
+                file_path = f"static/uploads/{doc}"
+                file_url = f"/static/uploads/{doc}"
+            
+            file_exists = os.path.exists(file_path)
+            print(f"DEBUG: Checking file: {file_path}, exists: {file_exists}")
+            
+            if file_exists:
+                try:
+                    file_size = os.path.getsize(file_path)
+                    file_extension = os.path.splitext(doc)[1].lower()
+                    # Lấy tên file từ path
+                    filename = os.path.basename(doc) if "/" in doc else doc
+                    existing_documents.append({
+                        "filename": filename,
+                        "url": file_url,
+                        "size": file_size,
+                        "extension": file_extension,
+                        "exists": True
+                    })
+                    print(f"DEBUG: Added document: {doc}, size: {file_size} bytes")
+                except Exception as e:
+                    print(f"DEBUG: Error getting file size for {doc}: {e}")
+                    filename = os.path.basename(doc) if "/" in doc else doc
+                    existing_documents.append({
+                        "filename": filename,
+                        "url": file_url,
+                        "exists": False,
+                        "error": f"Lỗi khi đọc file: {str(e)}"
+                    })
+            else:
+                filename = os.path.basename(doc) if "/" in doc else doc
                 existing_documents.append({
-                    "filename": doc,
-                    "url": f"/static/uploads/{doc}",
-                    "exists": False
+                    "filename": filename,
+                    "url": file_url,
+                    "exists": False,
+                    "error": "File không tồn tại trên server"
                 })
+                print(f"DEBUG: File not found: {file_path}")
         
+        print(f"DEBUG: Returning {len(existing_documents)} documents")
         return JSONResponse(
             status_code=200,
             content={
@@ -1706,10 +2170,20 @@ async def get_vehicle_documents(vehicle_id: int, db: Session = Depends(get_db)):
             }
         )
         
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"DEBUG: JSON decode error: {e}")
+        print(f"DEBUG: Raw inspection_documents: {vehicle.inspection_documents}")
         return JSONResponse(
             status_code=200,
-            content={"success": True, "documents": [], "message": "Dữ liệu sổ đăng kiểm không hợp lệ"}
+            content={"success": True, "documents": [], "message": f"Dữ liệu sổ đăng kiểm không hợp lệ: {str(e)}"}
+        )
+    except Exception as e:
+        print(f"DEBUG: Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": f"Lỗi hệ thống: {str(e)}"}
         )
 
 @app.delete("/vehicles/documents/{vehicle_id}")
@@ -1736,24 +2210,32 @@ async def delete_vehicle_document(
         import json
         documents = json.loads(vehicle.inspection_documents)
         
-        # Kiểm tra file có tồn tại trong danh sách không
-        if filename not in documents:
+        # Tìm file trong danh sách (có thể là filename hoặc full path)
+        file_to_remove = None
+        for doc in documents:
+            # So sánh với filename hoặc basename của path
+            doc_basename = os.path.basename(doc) if "/" in doc else doc
+            if doc == filename or doc_basename == filename:
+                file_to_remove = doc
+                break
+        
+        if not file_to_remove:
             return JSONResponse(
                 status_code=400,
                 content={"success": False, "error": "File không tồn tại trong danh sách sổ đăng kiểm"}
             )
         
         # Xóa file khỏi thư mục lưu trữ
-        file_path = f"static/uploads/{filename}"
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                # Log lỗi nhưng vẫn tiếp tục xóa khỏi DB
-                print(f"Lỗi khi xóa file {file_path}: {str(e)}")
+        # Hỗ trợ cả path cũ và mới
+        if file_to_remove.startswith("Picture/"):
+            file_path = file_to_remove
+        else:
+            file_path = f"static/uploads/{file_to_remove}"
+        
+        delete_file_if_exists(file_path)
         
         # Xóa file khỏi danh sách trong DB
-        documents.remove(filename)
+        documents.remove(file_to_remove)
         
         if documents:
             # Còn sổ đăng kiểm khác, cập nhật danh sách
@@ -1808,22 +2290,34 @@ async def get_vehicle_phu_hieu_documents(vehicle_id: int, db: Session = Depends(
         # Kiểm tra file tồn tại
         existing_documents = []
         for doc in documents:
-            file_path = f"static/uploads/{doc}"
+            # Hỗ trợ cả path cũ (static/uploads/) và path mới (Picture/...)
+            if doc.startswith("Picture/"):
+                # Path mới - sử dụng trực tiếp
+                file_path = doc
+                file_url = get_file_url(doc)
+            else:
+                # Path cũ - giữ nguyên để backward compatibility
+                file_path = f"static/uploads/{doc}"
+                file_url = f"/static/uploads/{doc}"
+            
             if os.path.exists(file_path):
                 file_size = os.path.getsize(file_path)
                 file_extension = os.path.splitext(doc)[1].lower()
+                filename = os.path.basename(doc) if "/" in doc else doc
                 existing_documents.append({
-                    "filename": doc,
-                    "url": f"/static/uploads/{doc}",
+                    "filename": filename,
+                    "url": file_url,
                     "size": file_size,
                     "extension": file_extension,
                     "exists": True
                 })
             else:
+                filename = os.path.basename(doc) if "/" in doc else doc
                 existing_documents.append({
-                    "filename": doc,
-                    "url": f"/static/uploads/{doc}",
-                    "exists": False
+                    "filename": filename,
+                    "url": file_url,
+                    "exists": False,
+                    "error": "File không tồn tại trên server"
                 })
         
         return JSONResponse(
@@ -1865,24 +2359,32 @@ async def delete_vehicle_phu_hieu_document(
         import json
         documents = json.loads(vehicle.phu_hieu_files)
         
-        # Kiểm tra file có tồn tại trong danh sách không
-        if filename not in documents:
+        # Tìm file trong danh sách (có thể là filename hoặc full path)
+        file_to_remove = None
+        for doc in documents:
+            # So sánh với filename hoặc basename của path
+            doc_basename = os.path.basename(doc) if "/" in doc else doc
+            if doc == filename or doc_basename == filename:
+                file_to_remove = doc
+                break
+        
+        if not file_to_remove:
             return JSONResponse(
                 status_code=400,
                 content={"success": False, "error": "File không tồn tại trong danh sách phù hiệu vận tải"}
             )
         
         # Xóa file khỏi thư mục lưu trữ
-        file_path = f"static/uploads/{filename}"
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                # Log lỗi nhưng vẫn tiếp tục xóa khỏi DB
-                print(f"Lỗi khi xóa file {file_path}: {str(e)}")
+        # Hỗ trợ cả path cũ và mới
+        if file_to_remove.startswith("Picture/"):
+            file_path = file_to_remove
+        else:
+            file_path = f"static/uploads/{file_to_remove}"
+        
+        delete_file_if_exists(file_path)
         
         # Xóa file khỏi danh sách trong DB
-        documents.remove(filename)
+        documents.remove(file_to_remove)
         
         if documents:
             # Còn phù hiệu vận tải khác, cập nhật danh sách
@@ -2592,6 +3094,21 @@ async def delete_maintenance(
             "error": f"Lỗi hệ thống: {str(e)}"
         }, status_code=500)
 
+@app.get("/operations", response_class=HTMLResponse)
+async def operations_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Nếu chưa đăng nhập, redirect về login
+    if current_user is None:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    # Chỉ Admin mới được truy cập
+    if current_user["role"] != "Admin":
+        return RedirectResponse(url="/daily-new", status_code=303)
+    
+    return templates.TemplateResponse("operations.html", {
+        "request": request,
+        "current_user": current_user
+    })
+
 @app.get("/routes", response_class=HTMLResponse)
 async def routes_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # Nếu chưa đăng nhập, redirect về login
@@ -2912,8 +3429,9 @@ async def revenue_page(request: Request, db: Session = Depends(get_db), selected
         return RedirectResponse(url="/login", status_code=303)
     
     # Kiểm tra quyền truy cập (User hoặc Admin)
-    if not check_page_access(current_user["role"], "/revenue"):
-        return RedirectResponse(url="/daily-new", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/revenue", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     today = date.today()
     
@@ -3595,8 +4113,9 @@ async def daily_new_page(
         return RedirectResponse(url="/login", status_code=303)
     
     # Kiểm tra quyền truy cập (User hoặc Admin)
-    if not check_page_access(current_user["role"], "/daily-new"):
-        return RedirectResponse(url="/login", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/daily-new", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     routes = db.query(Route).filter(Route.is_active == 1, Route.status == 1).all()
     employees = db.query(Employee).filter(Employee.status == 1).all()
@@ -5037,9 +5556,11 @@ async def export_fuel_report_excel(
 async def theo_doi_dau_v2_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(get_current_user),
+    month: Optional[int] = None,
+    year: Optional[int] = None
 ):
-    """Trang Theo dõi dầu V2 - Hiển thị tất cả bản ghi đổ dầu"""
+    """Trang Theo dõi dầu V2 - Hiển thị bản ghi đổ dầu với bộ lọc theo tháng"""
     # Nếu chưa đăng nhập, redirect về login
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
@@ -5058,8 +5579,38 @@ async def theo_doi_dau_v2_page(
     # Ghép lại: Xe Nhà trước, Xe Đối tác sau
     sorted_vehicles = xe_nha + xe_doi_tac
     
-    # Lấy tất cả bản ghi đổ dầu, sắp xếp theo ngày giảm dần
-    fuel_records = db.query(FuelRecord).order_by(FuelRecord.date.desc(), FuelRecord.id.desc()).all()
+    # Xác định tháng/năm để lọc (mặc định là tháng hiện tại)
+    today = date.today()
+    selected_month = month if month is not None else today.month
+    selected_year = year if year is not None else today.year
+    
+    # Validate tháng/năm
+    if selected_month < 1 or selected_month > 12:
+        selected_month = today.month
+    if selected_year < 2000 or selected_year > 2100:
+        selected_year = today.year
+    
+    # Lọc bản ghi đổ dầu theo tháng/năm
+    # Tính ngày đầu và cuối tháng
+    from calendar import monthrange
+    days_in_month = monthrange(selected_year, selected_month)[1]
+    start_date = date(selected_year, selected_month, 1)
+    end_date = date(selected_year, selected_month, days_in_month)
+    
+    # Lọc theo khoảng ngày (tương thích với SQLite)
+    fuel_records_query = db.query(FuelRecord).filter(
+        and_(
+            FuelRecord.date >= start_date,
+            FuelRecord.date <= end_date
+        )
+    )
+    
+    # Sắp xếp theo ngày giảm dần
+    fuel_records = fuel_records_query.order_by(FuelRecord.date.desc(), FuelRecord.id.desc()).all()
+    
+    # Tính tổng số lít và tổng tiền theo tháng
+    total_liters = sum(record.liters_pumped for record in fuel_records)
+    total_cost = sum(record.cost_pumped for record in fuel_records)
     
     # Lấy lịch sử giá dầu, sắp xếp theo ngày áp dụng giảm dần
     diesel_prices = db.query(DieselPriceHistory).order_by(DieselPriceHistory.application_date.desc()).all()
@@ -5069,7 +5620,11 @@ async def theo_doi_dau_v2_page(
         "current_user": current_user,
         "fuel_records": fuel_records,
         "vehicles": sorted_vehicles,
-        "diesel_prices": diesel_prices
+        "diesel_prices": diesel_prices,
+        "selected_month": selected_month,
+        "selected_year": selected_year,
+        "total_liters": total_liters,
+        "total_cost": total_cost
     })
 
 @app.get("/api/do-dau/detail/{license_plate}")
@@ -5370,6 +5925,81 @@ async def get_all_fuel_records(
         return JSONResponse({
             "success": True,
             "records": records_data
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/do-dau/filter-by-month")
+async def get_fuel_records_by_month(
+    request: Request,
+    db: Session = Depends(get_db),
+    month_year: Optional[str] = None,
+    current_user = Depends(get_current_user)
+):
+    """API lấy bản ghi đổ dầu theo tháng/năm (format: YYYY-MM)"""
+    if current_user is None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    
+    try:
+        # Xác định tháng/năm để lọc (mặc định là tháng hiện tại)
+        today = date.today()
+        
+        if month_year:
+            try:
+                # Parse YYYY-MM format
+                year, month = map(int, month_year.split('-'))
+            except (ValueError, AttributeError):
+                year, month = today.year, today.month
+        else:
+            year, month = today.year, today.month
+        
+        # Validate tháng/năm
+        if month < 1 or month > 12:
+            month = today.month
+        if year < 2000 or year > 2100:
+            year = today.year
+        
+        # Tính ngày đầu và cuối tháng
+        from calendar import monthrange
+        days_in_month = monthrange(year, month)[1]
+        start_date = date(year, month, 1)
+        end_date = date(year, month, days_in_month)
+        
+        # Lọc theo khoảng ngày
+        fuel_records_query = db.query(FuelRecord).filter(
+            and_(
+                FuelRecord.date >= start_date,
+                FuelRecord.date <= end_date
+            )
+        )
+        
+        # Sắp xếp theo ngày giảm dần
+        fuel_records = fuel_records_query.order_by(FuelRecord.date.desc(), FuelRecord.id.desc()).all()
+        
+        # Tính tổng số lít và tổng tiền theo tháng
+        total_liters = sum(record.liters_pumped for record in fuel_records)
+        total_cost = sum(record.cost_pumped for record in fuel_records)
+        
+        # Chuyển đổi sang JSON
+        records_data = []
+        for record in fuel_records:
+            records_data.append({
+                'id': record.id,
+                'date': record.date.strftime('%Y-%m-%d'),
+                'license_plate': record.license_plate,
+                'unit_price': record.fuel_price_per_liter or 0.0,
+                'liters': record.liters_pumped or 0.0,
+                'total_amount': record.cost_pumped or 0.0,
+                'notes': record.notes or ''
+            })
+        
+        return JSONResponse({
+            "success": True,
+            "records": records_data,
+            "selected_month": month,
+            "selected_year": year,
+            "total_liters": total_liters,
+            "total_cost": total_cost
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -6547,8 +7177,9 @@ async def salary_calculation_v2_page(
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
     
-    if not check_page_access(current_user["role"], "/salary-calculation-v2"):
-        return RedirectResponse(url="/login", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/salary-calculation-v2", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     # Xác định tab hiện tại (mặc định là "driver" - tính lương lái xe)
     current_tab = tab if tab in ["driver", "partner"] else "driver"
@@ -6746,8 +7377,9 @@ async def export_salary_calculation_v2_excel(
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
     
-    if not check_page_access(current_user["role"], "/salary-calculation-v2"):
-        return RedirectResponse(url="/login", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/salary-calculation-v2", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     # Xác định tab hiện tại (mặc định là "driver")
     current_tab = tab if tab in ["driver", "partner"] else "driver"
@@ -8136,8 +8768,9 @@ async def financial_statistics_page(
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
     
-    if not check_page_access(current_user["role"], "/financial-statistics"):
-        return RedirectResponse(url="/", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/financial-statistics", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     # Nếu không có from_date hoặc to_date, set mặc định là đầu tháng và cuối tháng hiện tại
     if not from_date or not to_date:
@@ -8428,8 +9061,9 @@ async def timekeeping_v1_page(
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
     
-    if not check_page_access(current_user["role"], "/timekeeping-v1"):
-        return RedirectResponse(url="/login", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/timekeeping-v1", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     # Lấy danh sách các bảng chấm công đã tạo
     timekeeping_tables = db.query(TimekeepingTable).order_by(TimekeepingTable.created_at.desc()).all()
@@ -8540,8 +9174,9 @@ async def timekeeping_v1_detail_page(
     if current_user is None:
         return RedirectResponse(url="/login", status_code=303)
     
-    if not check_page_access(current_user["role"], "/timekeeping-v1"):
-        return RedirectResponse(url="/login", status_code=303)
+    redirect_response = check_and_redirect_access(current_user["role"], "/timekeeping-v1", current_user["id"], db)
+    if redirect_response:
+        return redirect_response
     
     # Lấy thông tin bảng chấm công
     timekeeping_table = db.query(TimekeepingTable).filter(TimekeepingTable.id == table_id).first()
@@ -8711,7 +9346,7 @@ async def save_timekeeping_detail(
     """Lưu dữ liệu chấm công chi tiết"""
     if current_user is None:
         return JSONResponse({"success": False, "message": "Bạn cần đăng nhập"}, status_code=401)
-    if not check_page_access(current_user["role"], "/timekeeping-v1"):
+    if not check_page_access(current_user["role"], "/timekeeping-v1", current_user["id"], db):
         return JSONResponse({"success": False, "message": "Không có quyền truy cập"}, status_code=403)
 
     table = db.query(TimekeepingTable).filter(TimekeepingTable.id == table_id).first()
@@ -8803,7 +9438,7 @@ async def export_timekeeping_excel(
     """Xuất bảng chấm công ra file Excel"""
     if current_user is None:
         return JSONResponse({"success": False, "message": "Bạn cần đăng nhập"}, status_code=401)
-    if not check_page_access(current_user["role"], "/timekeeping-v1"):
+    if not check_page_access(current_user["role"], "/timekeeping-v1", current_user["id"], db):
         return JSONResponse({"success": False, "message": "Không có quyền truy cập"}, status_code=403)
     
     # Lấy thông tin bảng chấm công
@@ -8986,7 +9621,7 @@ async def delete_timekeeping_table(
     """Xóa bảng chấm công và tất cả dữ liệu liên quan"""
     if current_user is None:
         return JSONResponse({"success": False, "message": "Bạn cần đăng nhập"}, status_code=401)
-    if not check_page_access(current_user["role"], "/timekeeping-v1"):
+    if not check_page_access(current_user["role"], "/timekeeping-v1", current_user["id"], db):
         return JSONResponse({"success": False, "message": "Không có quyền truy cập"}, status_code=403)
     
     # Lấy thông tin bảng chấm công
@@ -9025,7 +9660,7 @@ async def filter_timekeeping_data(
     """Lọc dữ liệu chấm công theo các điều kiện"""
     if current_user is None:
         return JSONResponse({"success": False, "message": "Bạn cần đăng nhập"}, status_code=401)
-    if not check_page_access(current_user["role"], "/timekeeping-v1"):
+    if not check_page_access(current_user["role"], "/timekeeping-v1", current_user["id"], db):
         return JSONResponse({"success": False, "message": "Không có quyền truy cập"}, status_code=403)
     
     # Lấy thông tin bảng chấm công
@@ -9094,7 +9729,7 @@ async def export_filtered_timekeeping_excel(
     """Xuất Excel dữ liệu chấm công đã được lọc"""
     if current_user is None:
         return JSONResponse({"success": False, "message": "Bạn cần đăng nhập"}, status_code=401)
-    if not check_page_access(current_user["role"], "/timekeeping-v1"):
+    if not check_page_access(current_user["role"], "/timekeeping-v1", current_user["id"], db):
         return JSONResponse({"success": False, "message": "Không có quyền truy cập"}, status_code=403)
     
     # Lấy thông tin bảng chấm công
@@ -9494,7 +10129,13 @@ async def statistics_finance_details(
     })
 
 @app.get("/accounts", response_class=HTMLResponse)
-async def accounts_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+async def accounts_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+    page: int = 1,
+    per_page: int = 20
+):
     """Trang quản lý tài khoản - chỉ dành cho Admin"""
     # Nếu chưa đăng nhập, redirect về login
     if current_user is None:
@@ -9504,21 +10145,47 @@ async def accounts_page(request: Request, db: Session = Depends(get_db), current
     if current_user["role"] != "Admin":
         return RedirectResponse(url="/daily-new", status_code=303)
     
-    accounts = db.query(Account).order_by(Account.created_at.desc()).all()
+    # Query cơ bản - lấy tất cả accounts, sắp xếp theo created_at desc
+    query = db.query(Account).order_by(Account.created_at.desc())
+    
+    # Phân trang
+    total = query.count()
+    accounts = query.offset((page - 1) * per_page).limit(per_page).all()
+    
+    # Tính toán phân trang
+    total_pages = (total + per_page - 1) // per_page
+    
     return templates.TemplateResponse("account.html", {
         "request": request,
         "current_user": current_user,
-        "accounts": accounts
+        "accounts": accounts,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages
     })
 
 @app.post("/accounts/add")
 async def add_account(
+    request: Request,
     username: str = Form(...),
-    password: str = Form(...),
+    password: Optional[str] = Form(None),
+    full_name: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
     role: str = Form(...),
-    db: Session = Depends(get_db)
+    status: str = Form("Active"),
+    auto_generate_password: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
-    """Thêm tài khoản mới"""
+    """Thêm tài khoản mới - chỉ Admin"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền thực hiện thao tác này"
+        }, status_code=403)
+    
     try:
         # Kiểm tra username đã tồn tại chưa
         existing_account = db.query(Account).filter(Account.username == username).first()
@@ -9528,33 +10195,80 @@ async def add_account(
                 "message": "Username đã tồn tại"
             }, status_code=400)
         
-        # Validate password
-        is_valid, error_message = validate_password(password)
-        if not is_valid:
-            return JSONResponse({
-                "success": False,
-                "message": error_message
-            }, status_code=400)
+        # Xử lý mật khẩu
+        if auto_generate_password == "true":
+            final_password = generate_password()
+        else:
+            if not password:
+                return JSONResponse({
+                    "success": False,
+                    "message": "Vui lòng nhập mật khẩu hoặc chọn tự động tạo"
+                }, status_code=400)
+            
+            # Validate password
+            is_valid, error_message = validate_password(password)
+            if not is_valid:
+                return JSONResponse({
+                    "success": False,
+                    "message": error_message
+                }, status_code=400)
+            final_password = password
         
         # Validate role
-        if role not in ["Admin", "User", "Guest"]:
+        if role not in ["Admin", "Manager", "User"]:
             return JSONResponse({
                 "success": False,
-                "message": "Phân quyền không hợp lệ. Chỉ chấp nhận: Admin, User, Guest"
+                "message": "Phân quyền không hợp lệ. Chỉ chấp nhận: Admin, Manager, User"
+            }, status_code=400)
+        
+        # Validate status
+        if status not in ["Active", "Inactive"]:
+            return JSONResponse({
+                "success": False,
+                "message": "Trạng thái không hợp lệ"
             }, status_code=400)
         
         # Tạo tài khoản mới
         new_account = Account(
             username=username,
-            password=password,  # Lưu plain text, có thể hash sau
-            role=role
+            password=final_password,
+            full_name=full_name,
+            email=email,
+            phone=phone,
+            role=role,
+            status=status
         )
         db.add(new_account)
         db.commit()
+        db.refresh(new_account)
+        
+        # Ghi audit log
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="create",
+            entity_type="account",
+            entity_id=new_account.id,
+            new_values={
+                "username": username,
+                "full_name": full_name,
+                "email": email,
+                "phone": phone,
+                "role": role,
+                "status": status
+            },
+            description=f"Tạo tài khoản mới: {username}",
+            ip_address=get_client_ip(request)
+        )
         
         return JSONResponse({
             "success": True,
-            "message": "Đã thêm tài khoản thành công"
+            "message": "Đã thêm tài khoản thành công",
+            "data": {
+                "id": new_account.id,
+                "username": username,
+                "password": final_password if auto_generate_password == "true" else None
+            }
         })
         
     except Exception as e:
@@ -9564,9 +10278,25 @@ async def add_account(
             "message": f"Lỗi khi thêm tài khoản: {str(e)}"
         }, status_code=500)
 
-@app.post("/accounts/delete/{account_id}")
-async def delete_account(account_id: int, db: Session = Depends(get_db)):
-    """Xóa tài khoản"""
+@app.post("/accounts/update/{account_id}")
+async def update_account(
+    request: Request,
+    account_id: int,
+    full_name: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
+    role: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Cập nhật thông tin tài khoản - chỉ Admin"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền thực hiện thao tác này"
+        }, status_code=403)
+    
     try:
         account = db.query(Account).filter(Account.id == account_id).first()
         
@@ -9576,8 +10306,328 @@ async def delete_account(account_id: int, db: Session = Depends(get_db)):
                 "message": "Không tìm thấy tài khoản"
             }, status_code=404)
         
-        db.delete(account)
+        # Không cho phép Admin tự xóa chính mình
+        if account_id == current_user["id"]:
+            return JSONResponse({
+                "success": False,
+                "message": "Không thể chỉnh sửa tài khoản của chính bạn"
+            }, status_code=400)
+        
+        # Lưu giá trị cũ để audit log
+        old_values = {
+            "full_name": account.full_name,
+            "email": account.email,
+            "phone": account.phone,
+            "role": account.role,
+            "status": account.status
+        }
+        
+        # Cập nhật thông tin
+        if full_name is not None:
+            account.full_name = full_name
+        if email is not None:
+            account.email = email
+        if phone is not None:
+            account.phone = phone
+        if role is not None:
+            if role not in ["Admin", "Manager", "User"]:
+                return JSONResponse({
+                    "success": False,
+                    "message": "Phân quyền không hợp lệ"
+                }, status_code=400)
+            account.role = role
+        if status is not None:
+            if status not in ["Active", "Inactive"]:
+                return JSONResponse({
+                    "success": False,
+                    "message": "Trạng thái không hợp lệ"
+                }, status_code=400)
+            account.status = status
+        
+        account.updated_at = datetime.utcnow()
         db.commit()
+        db.refresh(account)
+        
+        # Ghi audit log
+        new_values = {
+            "full_name": account.full_name,
+            "email": account.email,
+            "phone": account.phone,
+            "role": account.role,
+            "status": account.status
+        }
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="update",
+            entity_type="account",
+            entity_id=account_id,
+            old_values=old_values,
+            new_values=new_values,
+            description=f"Cập nhật thông tin tài khoản: {account.username}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã cập nhật tài khoản thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi cập nhật tài khoản: {str(e)}"
+        }, status_code=500)
+
+@app.post("/accounts/reset-password/{account_id}")
+async def reset_password(
+    request: Request,
+    account_id: int,
+    new_password: Optional[str] = Form(None),
+    auto_generate: Optional[str] = Form("false"),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Reset mật khẩu - Admin reset cho user khác, User đổi mật khẩu của chính mình"""
+    if current_user is None:
+        return JSONResponse({
+            "success": False,
+            "message": "Chưa đăng nhập"
+        }, status_code=401)
+    
+    try:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        
+        if not account:
+            return JSONResponse({
+                "success": False,
+                "message": "Không tìm thấy tài khoản"
+            }, status_code=404)
+        
+        # User chỉ được đổi mật khẩu của chính mình
+        if current_user["role"] != "Admin" and account_id != current_user["id"]:
+            return JSONResponse({
+                "success": False,
+                "message": "Bạn chỉ có thể đổi mật khẩu của chính mình"
+            }, status_code=403)
+        
+        # Xử lý mật khẩu
+        if auto_generate == "true":
+            final_password = generate_password()
+        else:
+            if not new_password:
+                return JSONResponse({
+                    "success": False,
+                    "message": "Vui lòng nhập mật khẩu mới hoặc chọn tự động tạo"
+                }, status_code=400)
+            
+            # Validate password
+            is_valid, error_message = validate_password(new_password)
+            if not is_valid:
+                return JSONResponse({
+                    "success": False,
+                    "message": error_message
+                }, status_code=400)
+            final_password = new_password
+        
+        # Cập nhật mật khẩu
+        account.password = final_password
+        account.updated_at = datetime.utcnow()
+        db.commit()
+        
+        # Ghi audit log
+        action_desc = "reset_password" if current_user["role"] == "Admin" and account_id != current_user["id"] else "change_password"
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action=action_desc,
+            entity_type="account",
+            entity_id=account_id,
+            description=f"{'Reset' if action_desc == 'reset_password' else 'Đổi'} mật khẩu cho tài khoản: {account.username}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã đổi mật khẩu thành công",
+            "data": {
+                "password": final_password if auto_generate == "true" else None
+            }
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi đổi mật khẩu: {str(e)}"
+        }, status_code=500)
+
+@app.post("/accounts/lock/{account_id}")
+async def lock_account(
+    request: Request,
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Khoá tài khoản - chỉ Admin"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền thực hiện thao tác này"
+        }, status_code=403)
+    
+    try:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        
+        if not account:
+            return JSONResponse({
+                "success": False,
+                "message": "Không tìm thấy tài khoản"
+            }, status_code=404)
+        
+        # Không cho phép Admin tự khoá chính mình
+        if account_id == current_user["id"]:
+            return JSONResponse({
+                "success": False,
+                "message": "Không thể khoá tài khoản của chính bạn"
+            }, status_code=400)
+        
+        # Khoá tài khoản
+        account.is_locked = 1
+        account.locked_at = datetime.utcnow()
+        account.locked_by = current_user["id"]
+        account.updated_at = datetime.utcnow()
+        db.commit()
+        
+        # Ghi audit log
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="lock",
+            entity_type="account",
+            entity_id=account_id,
+            old_values={"is_locked": 0},
+            new_values={"is_locked": 1},
+            description=f"Khoá tài khoản: {account.username}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã khoá tài khoản thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi khoá tài khoản: {str(e)}"
+        }, status_code=500)
+
+@app.post("/accounts/unlock/{account_id}")
+async def unlock_account(
+    request: Request,
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Mở khoá tài khoản - chỉ Admin"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền thực hiện thao tác này"
+        }, status_code=403)
+    
+    try:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        
+        if not account:
+            return JSONResponse({
+                "success": False,
+                "message": "Không tìm thấy tài khoản"
+            }, status_code=404)
+        
+        # Mở khoá tài khoản
+        account.is_locked = 0
+        account.locked_at = None
+        account.locked_by = None
+        account.updated_at = datetime.utcnow()
+        db.commit()
+        
+        # Ghi audit log
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="unlock",
+            entity_type="account",
+            entity_id=account_id,
+            old_values={"is_locked": 1},
+            new_values={"is_locked": 0},
+            description=f"Mở khoá tài khoản: {account.username}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã mở khoá tài khoản thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi mở khoá tài khoản: {str(e)}"
+        }, status_code=500)
+
+@app.post("/accounts/delete/{account_id}")
+async def delete_account(
+    request: Request,
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Xóa tài khoản (soft delete) - chỉ Admin"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền thực hiện thao tác này"
+        }, status_code=403)
+    
+    try:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        
+        if not account:
+            return JSONResponse({
+                "success": False,
+                "message": "Không tìm thấy tài khoản"
+            }, status_code=404)
+        
+        # Không cho phép Admin tự xóa chính mình
+        if account_id == current_user["id"]:
+            return JSONResponse({
+                "success": False,
+                "message": "Không thể xóa tài khoản của chính bạn"
+            }, status_code=400)
+        
+        # Soft delete - đánh dấu là Inactive
+        old_status = account.status
+        account.status = "Inactive"
+        account.updated_at = datetime.utcnow()
+        db.commit()
+        
+        # Ghi audit log
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="delete",
+            entity_type="account",
+            entity_id=account_id,
+            old_values={"status": old_status},
+            new_values={"status": "Inactive"},
+            description=f"Xóa (vô hiệu hóa) tài khoản: {account.username}",
+            ip_address=get_client_ip(request)
+        )
         
         return JSONResponse({
             "success": True,
@@ -9590,6 +10640,193 @@ async def delete_account(account_id: int, db: Session = Depends(get_db)):
             "success": False,
             "message": f"Lỗi khi xóa tài khoản: {str(e)}"
         }, status_code=500)
+
+# ==================== PERMISSION MANAGEMENT ROUTES ====================
+
+@app.get("/accounts/{account_id}/permissions")
+async def get_user_permissions(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Lấy danh sách permissions của user - chỉ Admin"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền thực hiện thao tác này"
+        }, status_code=403)
+    
+    try:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            return JSONResponse({
+                "success": False,
+                "message": "Không tìm thấy tài khoản"
+            }, status_code=404)
+        
+        # Admin luôn có toàn quyền
+        if account.role == "Admin":
+            return JSONResponse({
+                "success": True,
+                "data": {
+                    "is_admin": True,
+                    "permissions": []
+                }
+            })
+        
+        # Lấy tất cả permissions
+        all_permissions = db.query(Permission).order_by(Permission.page_path).all()
+        
+        # Lấy permissions của user
+        user_permissions = db.query(UserPermission).filter(UserPermission.user_id == account_id).all()
+        user_permission_ids = [up.permission_id for up in user_permissions]
+        
+        # Nếu user chưa có permissions nào, mặc định tất cả đều được phép
+        # (has_permission = true cho tất cả)
+        # Nếu user đã có permissions, chỉ những permission có trong user_permissions mới được phép
+        is_new_user = len(user_permission_ids) == 0
+        
+        # Format dữ liệu
+        permissions_data = []
+        for perm in all_permissions:
+            # Mặc định: nếu user mới (chưa có permissions), tất cả đều được phép
+            # Nếu user đã có permissions, chỉ những permission có trong danh sách mới được phép
+            has_permission = True if is_new_user else (perm.id in user_permission_ids)
+            
+            permissions_data.append({
+                "id": perm.id,
+                "name": perm.name,
+                "description": perm.description,
+                "page_path": perm.page_path,
+                "action": perm.action,
+                "has_permission": has_permission
+            })
+        
+        return JSONResponse({
+            "success": True,
+            "data": {
+                "is_admin": False,
+                "permissions": permissions_data
+            }
+        })
+        
+    except Exception as e:
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi lấy permissions: {str(e)}"
+        }, status_code=500)
+
+@app.post("/accounts/{account_id}/permissions")
+async def update_user_permissions(
+    account_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Cập nhật permissions của user - chỉ Admin"""
+    if current_user is None or current_user["role"] != "Admin":
+        return JSONResponse({
+            "success": False,
+            "message": "Không có quyền thực hiện thao tác này"
+        }, status_code=403)
+    
+    try:
+        account = db.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            return JSONResponse({
+                "success": False,
+                "message": "Không tìm thấy tài khoản"
+            }, status_code=404)
+        
+        # Admin không thể thay đổi permissions
+        if account.role == "Admin":
+            return JSONResponse({
+                "success": False,
+                "message": "Không thể thay đổi permissions của Admin"
+            }, status_code=400)
+        
+        # Lấy dữ liệu từ request
+        try:
+            body = await request.json()
+        except Exception as e:
+            return JSONResponse({
+                "success": False,
+                "message": f"Lỗi khi parse request body: {str(e)}"
+            }, status_code=400)
+        
+        permission_ids = body.get("permission_ids", [])
+        
+        # Đảm bảo permission_ids là list of integers
+        if not isinstance(permission_ids, list):
+            return JSONResponse({
+                "success": False,
+                "message": "permission_ids phải là một mảng"
+            }, status_code=400)
+        
+        # Convert tất cả về integer
+        try:
+            permission_ids = [int(pid) for pid in permission_ids if pid is not None]
+        except (ValueError, TypeError) as e:
+            return JSONResponse({
+                "success": False,
+                "message": f"Lỗi khi convert permission_ids: {str(e)}"
+            }, status_code=400)
+        
+        # Xóa tất cả permissions cũ của user này
+        deleted_count = db.query(UserPermission).filter(UserPermission.user_id == account_id).delete()
+        
+        # Thêm permissions mới (không cần kiểm tra existing vì đã xóa hết rồi)
+        added_count = 0
+        for perm_id in permission_ids:
+            # Kiểm tra permission có tồn tại trong hệ thống không
+            permission = db.query(Permission).filter(Permission.id == perm_id).first()
+            if permission:
+                user_permission = UserPermission(
+                    user_id=account_id,
+                    permission_id=perm_id
+                )
+                db.add(user_permission)
+                added_count += 1
+        
+        db.commit()
+        
+        # Ghi audit log
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="update",
+            entity_type="user_permissions",
+            entity_id=account_id,
+            new_values={"permission_ids": permission_ids},
+            description=f"Cập nhật permissions cho user: {account.username}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Đã cập nhật permissions thành công"
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi cập nhật permissions: {str(e)}"
+        }, status_code=500)
+
+# Khởi tạo permissions sẽ được gọi sau khi initialize_permissions được định nghĩa
+def init_permissions_on_startup():
+    """Khởi tạo permissions khi khởi động ứng dụng"""
+    db = SessionLocal()
+    try:
+        initialize_permissions(db)
+    except Exception as e:
+        print(f"Error initializing permissions: {e}")
+    finally:
+        db.close()
+
+# Chạy khởi tạo permissions khi khởi động ứng dụng
+init_permissions_on_startup()
 
 if __name__ == "__main__":
     import uvicorn
