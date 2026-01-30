@@ -87,15 +87,17 @@
                     </a>
                     {% endif %}
                     
-                    {# Tài khoản - Chỉ Admin #}
-                    {% if has_page_access(current_user.role, "/accounts", current_user.id) %}
-                    <a href="/accounts" class="nav-card" data-tooltip="Quản lý tài khoản">
+                    {# Quản lý hành chính #}
+                    {% if has_page_access(current_user.role, "/administrative", current_user.id) %}
+                    <a href="/administrative" class="nav-card" data-tooltip="Quản lý hành chính">
                         <div class="nav-icon-box">
-                            <i class="fas fa-user-shield"></i>
+                            <i class="fas fa-folder-open"></i>
                         </div>
-                        <span class="nav-label">Tài khoản</span>
+                        <span class="nav-label">Hành chính</span>
                     </a>
                     {% endif %}
+                    
+                    {# (Removed) Menu Tài khoản đã được gỡ bỏ #}
                 {% endif %}
             </div>
             
@@ -119,9 +121,11 @@
         
         <!-- Main Content -->
         <div class="main-content">
+            {% if not request.query_params.get('embed') %}
             <div class="content-header">
                 <h1>{% block page_title %}Hệ thống quản lý vận chuyển{% endblock %}</h1>
             </div>
+            {% endif %}
             
             <div class="content-body">
                 {% block content %}{% endblock %}

@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}Phân quyền - RBAC{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+    <div class="page-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <h2>🔐 Phân quyền</h2>
+                <p>Gán permissions cho roles</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <a href="/role-management" class="btn btn-secondary btn-lg">
+                    <i class="fas fa-user-tag"></i> Quản lý vai trò
+                </a>
+                <a href="/user-management" class="btn btn-secondary btn-lg">
+                    <i class="fas fa-users-cog"></i> Quản lý người dùng
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Role Selection -->
+    <div class="table-section">
+        <h3>Chọn vai trò để phân quyền</h3>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Tên vai trò</th>
+                        <th>Mô tả</th>
+                        <th>Loại</th>
+                        <th>Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody id="rolesTableBody">
+                    <tr>
+                        <td colspan="5" style="text-align: center;">Đang tải...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Permission Assignment -->
+    <div id="permissionSection" style="display: none;" class="table-section">
+        <h3>Phân quyền cho vai trò: <span id="selectedRoleName"></span></h3>
+        <div id="permissionsCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; margin-top: 20px;">
+            <!-- Permissions sẽ được load ở đây -->
+        </div>
+        <div style="margin-top: 20px;">
+            <button type="button" class="btn btn-primary btn-lg" onclick="savePermissions()">
+                <i class="fas fa-save"></i> Lưu phân quyền
+            </button>
+            <button type="button" class="btn btn-secondary btn-lg" onclick="cancelSelection()">
+                <i class="fas fa-times"></i> Hủy
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentRoleId = null;
+let allPermissions = [];
+
+// Load roles
+async function loadRoles() {
+    try {
+        const response = await fetch('/api/roles');
+        const result = await response.json();
+        
+        if (result.success) {
+            renderRoles(result.data);
+        } else {
+            alert('Lỗi khi tải danh sách vai trò: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error loading roles:', error);
+        alert('Lỗi khi tải danh sách vai trò');
+    }
+}
+
+function renderRoles(roles) {
+    const tbody = document.getElementById('rolesTableBody');
+    
+    if (roles.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Chưa có vai trò nào</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = roles.map(role => `
+        <tr>
+            <td>${role.id}</td>
+            <td><strong>${role.name}</strong></td>
+            <td>${role.description || '-'}</td>
+            <td>${role.is_system_role ? '<span class="badge badge-warning">Hệ thống</span>' : '<span class="badge badge-info">Tùy chỉnh</span>'}</td>
+            <td>
+                <button type="button" class="btn btn-sm btn-primary" onclick="selectRole(${role.id}, '${role.name}')">
+                    <i class="fas fa-key"></i> Phân quyền
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// Select role to assign permissions
+async function selectRole(roleId, roleName) {
+    currentRoleId = roleId;
+    document.getElementById('selectedRoleName').textContent = roleName;
+    document.getElementById('permissionSection').style.display = 'block';
+    
+    // Load permissions
+    await loadPermissions();
+    await loadRolePermissions(roleId);
+}
+
+// Load all permissions
+async function loadPermissions() {
+    try {
+        const response = await fetch('/api/permissions');
+        const result = await response.json();
+        
+        if (result.success) {
+            allPermissions = [];
+            result.data.forEach(page => {
+                page.permissions.forEach(perm => {
+                    allPermissions.push({
+                        ...perm,
+                        page_path: page.page_path
+                    });
+                });
+            });
+            renderPermissions();
+        }
+    } catch (error) {
+        console.error('Error loading permissions:', error);
+    }
+}
+
+function renderPermissions() {
+    const container = document.getElementById('permissionsCheckboxes');
+    
+    // Group by page_path
+    const grouped = {};
+    allPermissions.forEach(perm => {
+        if (!grouped[perm.page_path]) {
+            grouped[perm.page_path] = [];
+        }
+        grouped[perm.page_path].push(perm);
+    });
+    
+    container.innerHTML = Object.keys(grouped).map(pagePath => {
+        const perms = grouped[pagePath];
+        return `
+            <div style="border: 1px solid #ddd; padding: 15px; border-radius: 8px;">
+                <h4 style="margin-top: 0; margin-bottom: 10px;">${pagePath}</h4>
+                ${perms.map(perm => `
+                    <label style="display: block; margin-bottom: 8px;">
+                        <input type="checkbox" 
+                               data-permission-id="${perm.id}" 
+                               data-permission-code="${perm.code || perm.name}"
+                               style="margin-right: 8px;">
+                        <strong>${perm.code || perm.name}</strong>
+                        ${perm.description ? `<br><small style="color: #666;">${perm.description}</small>` : ''}
+                    </label>
+                `).join('')}
+            </div>
+        `;
+    }).join('');
+}
+
+// Load role permissions
+async function loadRolePermissions(roleId) {
+    try {
+        const response = await fetch(`/api/roles/${roleId}/permissions`);
+        const result = await response.json();
+        
+        if (result.success) {
+            const permissionIds = new Set(result.data.permission_ids);
+            
+            // Check checkboxes
+            document.querySelectorAll('#permissionsCheckboxes input[type="checkbox"]').forEach(checkbox => {
+                const permId = parseInt(checkbox.getAttribute('data-permission-id'));
+                checkbox.checked = permissionIds.has(permId);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading role permissions:', error);
+    }
+}
+
+// Save permissions
+async function savePermissions() {
+    if (!currentRoleId) {
+        alert('Vui lòng chọn vai trò');
+        return;
+    }
+    
+    const checkedBoxes = document.querySelectorAll('#permissionsCheckboxes input[type="checkbox"]:checked');
+    const permissionIds = Array.from(checkedBoxes).map(cb => parseInt(cb.getAttribute('data-permission-id')));
+    
+    try {
+        const response = await fetch(`/api/roles/${currentRoleId}/permissions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ permission_ids: permissionIds })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('Đã lưu phân quyền thành công!');
+        } else {
+            alert('Lỗi khi lưu phân quyền: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error saving permissions:', error);
+        alert('Lỗi khi lưu phân quyền');
+    }
+}
+
+function cancelSelection() {
+    currentRoleId = null;
+    document.getElementById('permissionSection').style.display = 'none';
+    document.getElementById('permissionsCheckboxes').innerHTML = '';
+}
+
+// Load on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadRoles();
+});
+</script>
+{% endblock %}
+

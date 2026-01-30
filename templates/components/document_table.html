@@ -1,0 +1,318 @@
+<!-- Reusable Document Table Component -->
+<div class="document-table-wrapper">
+    <div class="table-responsive">
+        <table class="data-table document-table">
+            <thead>
+                <tr>
+                    <th style="width: 50px;">STT</th>
+                    <th>Tiêu đề</th>
+                    <th style="width: 120px;">Danh mục</th>
+                    <th style="width: 180px;">Loại tài liệu</th>
+                    <th style="width: 150px;">Liên kết với</th>
+                    <th style="width: 120px;">Ngày phát hành</th>
+                    <th style="width: 120px;">Ngày hết hạn</th>
+                    <th style="width: 120px;">Trạng thái</th>
+                    <th style="width: 120px;">Người tạo</th>
+                    <th style="width: 150px;">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody id="documentsTableBody">
+                {% if documents %}
+                    {% for doc in documents %}
+                    <tr class="document-row">
+                        <td>{{ loop.index }}</td>
+                        <td>
+                            <div class="document-title-cell">
+                                <strong>{{ doc.title }}</strong>
+                                {% if doc.description %}
+                                <small class="text-muted">{{ doc.description[:50] }}{% if doc.description|length > 50 %}...{% endif %}</small>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ doc.category }}">
+                                {% if doc.category == 'legal' %}
+                                    <i class="fas fa-gavel"></i> Pháp lý
+                                {% elif doc.category == 'administrative' %}
+                                    <i class="fas fa-users"></i> HR
+                                {% elif doc.category == 'tax' %}
+                                    <i class="fas fa-receipt"></i> Thuế
+                                {% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="document-type-cell">
+                                {{ doc.document_type }}
+                            </div>
+                        </td>
+                        <td>
+                            {% if doc.related_entity_type == 'employee' and doc.related_entity_id %}
+                                {% if doc.related_employee %}
+                                    <span class="badge badge-info" title="Nhân viên">
+                                        <i class="fas fa-user"></i> {{ doc.related_employee.name }}
+                                        {% if doc.related_employee.position %}
+                                            <small>({{ doc.related_employee.position }})</small>
+                                        {% endif %}
+                                    </span>
+                                {% else %}
+                                    <span class="badge badge-info">Nhân viên (ID: {{ doc.related_entity_id }})</span>
+                                {% endif %}
+                            {% elif doc.related_entity_type == 'partner' %}
+                                {% set partner_name = doc.notes.split('Đối tác/Khách hàng: ')[1].split('\n')[0] if 'Đối tác/Khách hàng:' in (doc.notes or '') else 'Đối tác/Khách hàng' %}
+                                <span class="badge badge-warning" title="Đối tác/Khách hàng">
+                                    <i class="fas fa-handshake"></i> {{ partner_name }}
+                                </span>
+                            {% elif doc.related_entity_type == 'vehicle' %}
+                                <span class="badge badge-secondary" title="Xe">
+                                    <i class="fas fa-car"></i> Xe (ID: {{ doc.related_entity_id }})
+                                </span>
+                            {% elif doc.related_entity_type == 'company' %}
+                                <span class="badge badge-secondary" title="Công ty">
+                                    <i class="fas fa-building"></i> Công ty
+                                </span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if doc.issued_date %}
+                                <div class="date-cell">
+                                    <i class="fas fa-calendar"></i> {{ doc.issued_date.strftime('%d/%m/%Y') }}
+                                    {% if doc.category == 'tax' %}
+                                        <br><small class="text-muted">Kỳ: {{ doc.issued_date.strftime('%m/%Y') }}</small>
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if doc.expiry_date %}
+                                <div class="date-cell {% if doc.expiry_date < today %}expired-date{% endif %}">
+                                    <i class="fas fa-calendar-times"></i> {{ doc.expiry_date.strftime('%d/%m/%Y') }}
+                                    {% if doc.expiry_date < today %}
+                                        <br><small class="text-danger"><i class="fas fa-exclamation-triangle"></i> Đã quá hạn</small>
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="status-badge status-{{ doc.status }}">
+                                {% if doc.status == 'active' %}
+                                    <i class="fas fa-check-circle"></i> Đang hoạt động
+                                {% elif doc.status == 'expired' %}
+                                    <i class="fas fa-exclamation-circle"></i> Đã hết hạn
+                                {% elif doc.status == 'archived' %}
+                                    <i class="fas fa-archive"></i> Đã lưu trữ
+                                {% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="creator-cell">
+                                <i class="fas fa-user-circle"></i> {{ doc.creator.username if doc.creator else '-' }}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="action-buttons">
+                                <a href="/documents/view/{{ doc.id }}" target="_blank" class="btn btn-sm btn-info" title="Xem">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="/documents/download/{{ doc.id }}" class="btn btn-sm btn-secondary" title="Tải xuống">
+                                    <i class="fas fa-download"></i>
+                                </a>
+                                <a href="/documents/print/{{ doc.id }}" target="_blank" class="btn btn-sm btn-primary" title="In">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                                {% if has_page_access(current_user.role, "/administrative", current_user.id, db) %}
+                                <button type="button" class="btn btn-sm btn-warning" onclick="openEditModal({{ doc.id }})" title="Sửa">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteDocument({{ doc.id }}, '{{ doc.title|replace("'", "\\'") }}')" title="Xóa">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="10" class="empty-state">
+                            <div class="empty-state-content">
+                                <i class="fas fa-folder-open" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+                                <p style="font-size: 16px; color: #666; margin: 0;">Không có tài liệu nào</p>
+                                <p style="font-size: 14px; color: #999; margin-top: 8px;">Nhấn "Tải lên tài liệu" để thêm tài liệu mới</p>
+                            </div>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+.document-table-wrapper {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+
+.document-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.document-table thead {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.document-table thead th {
+    padding: 14px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.document-table tbody tr {
+    border-bottom: 1px solid #e1e8ed;
+    transition: background-color 0.2s;
+}
+
+.document-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.document-table tbody td {
+    padding: 12px;
+    font-size: 14px;
+    vertical-align: middle;
+}
+
+.document-title-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.document-title-cell strong {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.document-title-cell small {
+    color: #6c757d;
+    font-size: 12px;
+}
+
+.document-type-cell {
+    font-size: 13px;
+    color: #495057;
+}
+
+.date-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+}
+
+.date-cell i {
+    margin-right: 4px;
+    color: #667eea;
+}
+
+.creator-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #495057;
+}
+
+.creator-cell i {
+    color: #667eea;
+}
+
+.empty-state {
+    padding: 60px 20px !important;
+    text-align: center;
+}
+
+.empty-state-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.badge-info {
+    background-color: #17a2b8;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.badge-warning {
+    background-color: #ffc107;
+    color: #333;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.badge-secondary {
+    background-color: #6c757d;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.text-muted {
+    color: #6c757d;
+}
+
+.text-danger {
+    color: #dc3545;
+}
+
+@media (max-width: 1200px) {
+    .document-table {
+        font-size: 12px;
+    }
+    
+    .document-table thead th,
+    .document-table tbody td {
+        padding: 8px;
+    }
+    
+    .action-buttons {
+        flex-direction: column;
+    }
+    
+    .action-buttons .btn {
+        width: 100%;
+    }
+}
+</style>
+

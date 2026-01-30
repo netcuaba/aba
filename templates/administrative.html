@@ -1,0 +1,1502 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý hành chính{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+    <div class="page-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <h2>📋 Quản lý hành chính</h2>
+                <p>Quản lý tài liệu pháp lý, hành chính/HR và thuế</p>
+            </div>
+            {% if has_page_access(current_user.role, "/administrative", current_user.id) %}
+            <button type="button" class="btn btn-primary btn-lg" onclick="openUploadModal()">
+                <i class="fas fa-upload"></i> Tải lên tài liệu
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Category Tabs -->
+    <div class="category-tabs-wrapper">
+        <div class="category-tabs">
+            <button class="tab-btn {% if not category %}active{% endif %}" onclick="filterDocuments('')">
+                <i class="fas fa-list"></i>
+                <span>Tất cả</span>
+                <span class="tab-count">{{ legal_count + administrative_count + tax_count }}</span>
+            </button>
+            <button class="tab-btn {% if category == 'legal' %}active{% endif %}" onclick="filterDocuments('legal')">
+                <i class="fas fa-gavel"></i>
+                <span>Pháp lý</span>
+                <span class="tab-count">{{ legal_count }}</span>
+            </button>
+            <button class="tab-btn {% if category == 'administrative' %}active{% endif %}" onclick="filterDocuments('administrative')">
+                <i class="fas fa-users"></i>
+                <span>HR</span>
+                <span class="tab-count">{{ administrative_count }}</span>
+            </button>
+            <button class="tab-btn {% if category == 'tax' %}active{% endif %}" onclick="filterDocuments('tax')">
+                <i class="fas fa-receipt"></i>
+                <span>Thuế</span>
+                <span class="tab-count">{{ tax_count }}</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="filters-container">
+        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
+            <!-- Search by Title -->
+            <div class="filter-group" style="flex: 1; min-width: 250px;">
+                <label>Tìm kiếm theo tiêu đề:</label>
+                <form id="searchForm" onsubmit="applyFilters(); return false;" style="display: flex; gap: 5px;">
+                    <input type="text" id="searchInput" value="{{ search }}" placeholder="Nhập tiêu đề tài liệu..." class="form-control" style="flex: 1;">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-search"></i> Tìm
+                    </button>
+                    {% if search %}
+                    <button type="button" class="btn btn-secondary" onclick="clearSearch()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    {% endif %}
+                </form>
+            </div>
+            
+            <!-- Document Type Filter -->
+            <div class="filter-group" style="min-width: 200px;">
+                <label>Loại tài liệu:</label>
+                <select id="documentTypeFilter" onchange="applyFilters()" class="form-control">
+                    <option value="">Tất cả loại</option>
+                    {% for doc_type in document_types %}
+                    <option value="{{ doc_type }}" {% if document_type == doc_type %}selected{% endif %}>{{ doc_type }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <!-- Status Filter -->
+            <div class="filter-group" style="min-width: 180px;">
+                <label>Trạng thái:</label>
+                <select id="statusFilter" onchange="applyFilters()" class="form-control">
+                    <option value="">Tất cả</option>
+                    <option value="active" {% if status == 'active' %}selected{% endif %}>Đang hoạt động</option>
+                    <option value="expired" {% if status == 'expired' %}selected{% endif %}>Đã hết hạn</option>
+                    <option value="archived" {% if status == 'archived' %}selected{% endif %}>Đã lưu trữ</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- Date Range Filter -->
+        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end; margin-top: 15px;">
+            <div class="filter-group" style="min-width: 200px;">
+                <label>Từ ngày phát hành:</label>
+                <input type="date" id="dateFromFilter" value="{{ date_from }}" onchange="applyFilters()" class="form-control">
+            </div>
+            <div class="filter-group" style="min-width: 200px;">
+                <label>Đến ngày phát hành:</label>
+                <input type="date" id="dateToFilter" value="{{ date_to }}" onchange="applyFilters()" class="form-control">
+            </div>
+            {% if date_from or date_to %}
+            <div class="filter-group">
+                <button type="button" class="btn btn-secondary" onclick="clearDateFilter()" style="margin-top: 25px;">
+                    <i class="fas fa-times"></i> Xóa lọc ngày
+                </button>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Tax Period Filter (for Tax category) -->
+        {% if category == 'tax' or not category %}
+        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end; margin-top: 15px; padding-top: 15px; border-top: 1px solid #dee2e6;">
+            <div class="filter-group" style="min-width: 150px;">
+                <label>Kỳ thuế - Tháng:</label>
+                <select id="taxPeriodMonthFilter" onchange="applyFilters()" class="form-control">
+                    <option value="">Tất cả tháng</option>
+                    {% for month in range(1, 13) %}
+                    <option value="{{ month }}" {% if tax_period_month == month %}selected{% endif %}>Tháng {{ month }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group" style="min-width: 150px;">
+                <label>Kỳ thuế - Năm:</label>
+                <select id="taxPeriodYearFilter" onchange="applyFilters()" class="form-control">
+                    <option value="">Tất cả năm</option>
+                    {% for year in range(2020, 2031) %}
+                    <option value="{{ year }}" {% if tax_period_year == year %}selected{% endif %}>{{ year }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if tax_period_month or tax_period_year %}
+            <div class="filter-group">
+                <button type="button" class="btn btn-secondary" onclick="clearTaxPeriodFilter()" style="margin-top: 25px;">
+                    <i class="fas fa-times"></i> Xóa lọc kỳ thuế
+                </button>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Reusable Document Table Component -->
+    {% include "components/document_table.html" %}
+</div>
+
+<!-- Upload Modal -->
+<div id="uploadModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3><i class="fas fa-upload"></i> Tải lên tài liệu</h3>
+            <span class="close" onclick="closeModal('uploadModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Danh mục <span class="required">*</span></label>
+                        <select name="category" id="uploadCategory" required class="form-control">
+                            <option value="">Chọn danh mục</option>
+                            <option value="legal">Pháp lý</option>
+                            <option value="administrative">Hành chính/HR</option>
+                            <option value="tax">Thuế</option>
+                        </select>
+                        <span class="field-error" id="categoryError"></span>
+                    </div>
+                    <div class="form-group">
+                        <label>Loại tài liệu <span class="required">*</span></label>
+                        <select name="document_type" id="uploadDocumentType" required class="form-control" onchange="updateDocumentTypeOptions()">
+                            <option value="">Chọn loại tài liệu</option>
+                            <optgroup label="Tài liệu pháp lý">
+                                <option value="Company Charter">Điều lệ công ty</option>
+                                <option value="Business License (GPKD)">Giấy phép kinh doanh (GPKD)</option>
+                                <option value="Shareholder ID">CMND/CCCD cổ đông</option>
+                                <option value="Company Organization Chart">Sơ đồ tổ chức công ty</option>
+                                <option value="Internal Regulations">Quy chế nội bộ</option>
+                                <option value="Capital Contribution Documents">Tài liệu góp vốn</option>
+                                <option value="Internal Decisions">Quyết định nội bộ</option>
+                                <option value="Company Logo">Logo công ty</option>
+                            </optgroup>
+                            <optgroup label="Tài liệu Hành chính/HR">
+                                <option value="Job Application Files">Hồ sơ ứng viên</option>
+                                <option value="Labor Contracts">Hợp đồng lao động</option>
+                                <option value="Salary & Bonus Regulations">Quy định lương thưởng</option>
+                                <option value="Salary Scale Decisions">Quyết định thang lương</option>
+                                <option value="Timekeeping Sheets">Bảng chấm công</option>
+                                <option value="Salary Confirmation Sheets">Xác nhận lương</option>
+                                <option value="Customer / Partner Contracts">Hợp đồng khách hàng/Đối tác</option>
+                            </optgroup>
+                            <optgroup label="Tài liệu Thuế/Kế toán">
+                                <option value="Tax Declarations">Tờ khai thuế</option>
+                                <option value="Invoice Files (PDF/XML)">Hóa đơn (PDF/XML)</option>
+                                <option value="Accounting Books">Sổ sách kế toán</option>
+                                <option value="Tax Payment Receipts">Biên lai nộp thuế</option>
+                                <option value="Tax Submission Confirmations">Xác nhận nộp tờ khai</option>
+                            </optgroup>
+                            <optgroup label="Tài liệu khác">
+                                <option value="Other">Khác</option>
+                            </optgroup>
+                        </select>
+                        <input type="text" name="document_type_custom" id="uploadDocumentTypeCustom" class="form-control" style="display: none; margin-top: 5px;" placeholder="Nhập loại tài liệu khác...">
+                        <span class="field-error" id="documentTypeError"></span>
+                    </div>
+                </div>
+                
+                <div class="form-group" id="taxPeriodGroup" style="display: none;">
+                    <label>Kỳ thuế/Kế toán</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select name="tax_period_month" id="uploadTaxPeriodMonth" class="form-control" style="flex: 1;">
+                            <option value="">Tháng</option>
+                            {% for month in range(1, 13) %}
+                            <option value="{{ month }}">Tháng {{ month }}</option>
+                            {% endfor %}
+                        </select>
+                        <select name="tax_period_year" id="uploadTaxPeriodYear" class="form-control" style="flex: 1;">
+                            <option value="">Năm</option>
+                            {% for year in range(2020, 2031) %}
+                            <option value="{{ year }}" {% if year == today.year %}selected{% endif %}>{{ year }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Tiêu đề <span class="required">*</span></label>
+                    <input type="text" name="title" id="uploadTitle" required class="form-control" placeholder="Nhập tiêu đề tài liệu">
+                    <span class="field-error" id="titleError"></span>
+                </div>
+                
+                <div class="form-group">
+                    <label>File <span class="required">*</span></label>
+                    <div class="file-upload-wrapper">
+                        <input type="file" name="file" id="uploadFile" required class="form-control file-input" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onchange="validateFileUpload(this)">
+                        <div class="file-info" id="fileInfo" style="display: none;">
+                            <i class="fas fa-file"></i>
+                            <span id="fileName"></span>
+                            <span id="fileSize"></span>
+                        </div>
+                    </div>
+                    <small class="form-text text-muted">Chấp nhận: PDF, JPG, PNG, DOC, DOCX, XML (Tối đa 10MB)</small>
+                    <span class="field-error" id="fileError"></span>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ngày phát hành</label>
+                        <input type="date" name="issued_date" id="uploadIssuedDate" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" name="has_deadline" id="uploadHasDeadline" onchange="toggleDeadlineField()">
+                            Có hạn nộp/Deadline
+                        </label>
+                        <div id="deadlineGroup" style="display: none; margin-top: 10px;">
+                            <input type="date" name="expiry_date" id="uploadExpiryDate" class="form-control">
+                            <small class="form-text text-muted">Ngày hết hạn nộp tờ khai/thuế</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Liên kết với</label>
+                    <select name="related_entity_type" id="uploadRelatedEntityType" class="form-control" onchange="updateRelatedEntitySelection()">
+                        <option value="">Không liên kết</option>
+                        <option value="employee">Nhân viên</option>
+                        <option value="partner">Đối tác/Khách hàng</option>
+                        <option value="vehicle">Xe</option>
+                        <option value="company">Công ty</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="relatedEmployeeGroup" style="display: none;">
+                    <label>Chọn nhân viên</label>
+                    <select name="related_entity_id" id="uploadRelatedEmployeeId" class="form-control">
+                        <option value="">Chọn nhân viên</option>
+                        {% for emp in employees %}
+                        <option value="{{ emp.id }}">{{ emp.name }} {% if emp.position %}({{ emp.position }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="form-group" id="relatedPartnerGroup" style="display: none;">
+                    <label>Tên đối tác/Khách hàng</label>
+                    <input type="text" name="partner_name" id="uploadPartnerName" class="form-control" placeholder="Nhập tên đối tác/khách hàng">
+                    <input type="hidden" name="related_entity_id" id="uploadRelatedPartnerId" value="0">
+                </div>
+                
+                <div class="form-group" id="relatedEntityIdGroup" style="display: none;">
+                    <label>ID thực thể</label>
+                    <input type="number" name="related_entity_id" id="uploadRelatedEntityId" class="form-control">
+                </div>
+                
+                <div class="form-group">
+                    <label>Mô tả</label>
+                    <textarea name="description" id="uploadDescription" class="form-control" rows="3" placeholder="Nhập mô tả tài liệu (tùy chọn)"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Ghi chú</label>
+                    <textarea name="notes" id="uploadNotes" class="form-control" rows="2" placeholder="Nhập ghi chú (tùy chọn)"></textarea>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('uploadModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="uploadDocument()">
+                <i class="fas fa-upload"></i> Tải lên
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Preview Modal -->
+<div id="previewModal" class="modal">
+    <div class="modal-content modal-preview">
+        <div class="modal-header">
+            <h3 id="previewTitle"><i class="fas fa-eye"></i> Xem trước tài liệu</h3>
+            <span class="close" onclick="closeModal('previewModal')">&times;</span>
+        </div>
+        <div class="modal-body preview-body">
+            <div id="previewContent" class="preview-content">
+                <div class="loading-spinner">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <p>Đang tải...</p>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('previewModal')">Đóng</button>
+            <a id="previewDownloadLink" href="#" target="_blank" class="btn btn-primary">
+                <i class="fas fa-download"></i> Tải xuống
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="editModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3><i class="fas fa-edit"></i> Sửa tài liệu</h3>
+            <span class="close" onclick="closeModal('editModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="editForm" enctype="multipart/form-data">
+                <input type="hidden" id="editDocumentId">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Danh mục <span class="required">*</span></label>
+                        <select name="category" id="editCategory" required class="form-control">
+                            <option value="legal">Pháp lý</option>
+                            <option value="administrative">Hành chính/HR</option>
+                            <option value="tax">Thuế</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Loại tài liệu <span class="required">*</span></label>
+                        <select name="document_type" id="editDocumentType" required class="form-control" onchange="updateEditDocumentTypeOptions()">
+                            <option value="">Chọn loại tài liệu</option>
+                            <optgroup label="Tài liệu pháp lý">
+                                <option value="Company Charter">Điều lệ công ty</option>
+                                <option value="Business License (GPKD)">Giấy phép kinh doanh (GPKD)</option>
+                                <option value="Shareholder ID">CMND/CCCD cổ đông</option>
+                                <option value="Company Organization Chart">Sơ đồ tổ chức công ty</option>
+                                <option value="Internal Regulations">Quy chế nội bộ</option>
+                                <option value="Capital Contribution Documents">Tài liệu góp vốn</option>
+                                <option value="Internal Decisions">Quyết định nội bộ</option>
+                                <option value="Company Logo">Logo công ty</option>
+                            </optgroup>
+                            <optgroup label="Tài liệu Hành chính/HR">
+                                <option value="Job Application Files">Hồ sơ ứng viên</option>
+                                <option value="Labor Contracts">Hợp đồng lao động</option>
+                                <option value="Salary & Bonus Regulations">Quy định lương thưởng</option>
+                                <option value="Salary Scale Decisions">Quyết định thang lương</option>
+                                <option value="Timekeeping Sheets">Bảng chấm công</option>
+                                <option value="Salary Confirmation Sheets">Xác nhận lương</option>
+                                <option value="Customer / Partner Contracts">Hợp đồng khách hàng/Đối tác</option>
+                            </optgroup>
+                            <optgroup label="Tài liệu Thuế/Kế toán">
+                                <option value="Tax Declarations">Tờ khai thuế</option>
+                                <option value="Invoice Files (PDF/XML)">Hóa đơn (PDF/XML)</option>
+                                <option value="Accounting Books">Sổ sách kế toán</option>
+                                <option value="Tax Payment Receipts">Biên lai nộp thuế</option>
+                                <option value="Tax Submission Confirmations">Xác nhận nộp tờ khai</option>
+                            </optgroup>
+                            <optgroup label="Tài liệu khác">
+                                <option value="Other">Khác</option>
+                            </optgroup>
+                        </select>
+                        <input type="text" name="document_type_custom" id="editDocumentTypeCustom" class="form-control" style="display: none; margin-top: 5px;" placeholder="Nhập loại tài liệu khác...">
+                    </div>
+                </div>
+                
+                <div class="form-group" id="editTaxPeriodGroup" style="display: none;">
+                    <label>Kỳ thuế/Kế toán</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select name="tax_period_month" id="editTaxPeriodMonth" class="form-control" style="flex: 1;">
+                            <option value="">Tháng</option>
+                            {% for month in range(1, 13) %}
+                            <option value="{{ month }}">Tháng {{ month }}</option>
+                            {% endfor %}
+                        </select>
+                        <select name="tax_period_year" id="editTaxPeriodYear" class="form-control" style="flex: 1;">
+                            <option value="">Năm</option>
+                            {% for year in range(2020, 2031) %}
+                            <option value="{{ year }}" {% if year == today.year %}selected{% endif %}>{{ year }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Tiêu đề <span class="required">*</span></label>
+                    <input type="text" name="title" id="editTitle" required class="form-control">
+                </div>
+                
+                <div class="form-group">
+                    <label>File mới (để trống nếu không thay đổi)</label>
+                    <input type="file" name="file" id="editFile" class="form-control" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onchange="validateFileUpload(this, 'edit')">
+                    <small class="form-text text-muted">Chấp nhận: PDF, JPG, PNG, DOC, DOCX, XML (Tối đa 10MB)</small>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ngày phát hành</label>
+                        <input type="date" name="issued_date" id="editIssuedDate" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" name="has_deadline" id="editHasDeadline" onchange="toggleEditDeadlineField()">
+                            Có hạn nộp/Deadline
+                        </label>
+                        <div id="editDeadlineGroup" style="display: none; margin-top: 10px;">
+                            <input type="date" name="expiry_date" id="editExpiryDate" class="form-control">
+                            <small class="form-text text-muted">Ngày hết hạn nộp tờ khai/thuế</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Liên kết với</label>
+                    <select name="related_entity_type" id="editRelatedEntityType" class="form-control" onchange="updateEditRelatedEntitySelection()">
+                        <option value="">Không liên kết</option>
+                        <option value="employee">Nhân viên</option>
+                        <option value="partner">Đối tác/Khách hàng</option>
+                        <option value="vehicle">Xe</option>
+                        <option value="company">Công ty</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="editRelatedEmployeeGroup" style="display: none;">
+                    <label>Chọn nhân viên</label>
+                    <select name="related_entity_id" id="editRelatedEmployeeId" class="form-control">
+                        <option value="">Chọn nhân viên</option>
+                        {% for emp in employees %}
+                        <option value="{{ emp.id }}">{{ emp.name }} {% if emp.position %}({{ emp.position }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="form-group" id="editRelatedPartnerGroup" style="display: none;">
+                    <label>Tên đối tác/Khách hàng</label>
+                    <input type="text" name="partner_name" id="editPartnerName" class="form-control" placeholder="Nhập tên đối tác/khách hàng">
+                    <input type="hidden" name="related_entity_id" id="editRelatedPartnerId" value="0">
+                </div>
+                
+                <div class="form-group" id="editRelatedEntityIdGroup" style="display: none;">
+                    <label>ID thực thể</label>
+                    <input type="number" name="related_entity_id" id="editRelatedEntityId" class="form-control">
+                </div>
+                
+                <div class="form-group">
+                    <label>Trạng thái</label>
+                    <select name="status" id="editStatus" class="form-control">
+                        <option value="active">Đang hoạt động</option>
+                        <option value="expired">Đã hết hạn</option>
+                        <option value="archived">Đã lưu trữ</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Mô tả</label>
+                    <textarea name="description" id="editDescription" class="form-control" rows="3"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Ghi chú</label>
+                    <textarea name="notes" id="editNotes" class="form-control" rows="2"></textarea>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('editModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="updateDocument()">
+                <i class="fas fa-save"></i> Lưu
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentCategory = '{{ category or "" }}';
+let currentStatus = '{{ status or "" }}';
+let currentDocumentType = '{{ document_type or "" }}';
+let currentSearch = '{{ search or "" }}';
+let currentDateFrom = '{{ date_from or "" }}';
+let currentDateTo = '{{ date_to or "" }}';
+let currentTaxPeriodMonth = {{ tax_period_month or 'null' }};
+let currentTaxPeriodYear = {{ tax_period_year or 'null' }};
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_FILE_TYPES = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
+
+function buildFilterUrl() {
+    let url = '/administrative?';
+    const params = [];
+    
+    if (currentCategory) params.push(`category=${currentCategory}`);
+    if (currentDocumentType) params.push(`document_type=${encodeURIComponent(currentDocumentType)}`);
+    if (currentStatus) params.push(`status=${currentStatus}`);
+    if (currentSearch) params.push(`search=${encodeURIComponent(currentSearch)}`);
+    if (currentDateFrom) params.push(`date_from=${currentDateFrom}`);
+    if (currentDateTo) params.push(`date_to=${currentDateTo}`);
+    if (currentTaxPeriodMonth) params.push(`tax_period_month=${currentTaxPeriodMonth}`);
+    if (currentTaxPeriodYear) params.push(`tax_period_year=${currentTaxPeriodYear}`);
+    
+    return url + params.join('&');
+}
+
+function applyFilters() {
+    currentDocumentType = document.getElementById('documentTypeFilter').value;
+    currentStatus = document.getElementById('statusFilter').value;
+    currentSearch = document.getElementById('searchInput').value.trim();
+    currentDateFrom = document.getElementById('dateFromFilter').value;
+    currentDateTo = document.getElementById('dateToFilter').value;
+    
+    const taxPeriodMonthEl = document.getElementById('taxPeriodMonthFilter');
+    const taxPeriodYearEl = document.getElementById('taxPeriodYearFilter');
+    if (taxPeriodMonthEl) {
+        currentTaxPeriodMonth = taxPeriodMonthEl.value ? parseInt(taxPeriodMonthEl.value) : null;
+    }
+    if (taxPeriodYearEl) {
+        currentTaxPeriodYear = taxPeriodYearEl.value ? parseInt(taxPeriodYearEl.value) : null;
+    }
+    
+    window.location.href = buildFilterUrl();
+}
+
+function clearTaxPeriodFilter() {
+    document.getElementById('taxPeriodMonthFilter').value = '';
+    document.getElementById('taxPeriodYearFilter').value = '';
+    currentTaxPeriodMonth = null;
+    currentTaxPeriodYear = null;
+    applyFilters();
+}
+
+function filterDocuments(category) {
+    currentCategory = category;
+    window.location.href = buildFilterUrl();
+}
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    currentSearch = '';
+    applyFilters();
+}
+
+function clearDateFilter() {
+    document.getElementById('dateFromFilter').value = '';
+    document.getElementById('dateToFilter').value = '';
+    currentDateFrom = '';
+    currentDateTo = '';
+    applyFilters();
+}
+
+function validateFileUpload(input, prefix = 'upload') {
+    const file = input.files[0];
+    const fileError = document.getElementById(`${prefix === 'edit' ? 'edit' : ''}fileError`);
+    const fileInfo = document.getElementById('fileInfo');
+    const fileName = document.getElementById('fileName');
+    const fileSize = document.getElementById('fileSize');
+    
+    // Clear previous errors
+    if (fileError) fileError.textContent = '';
+    
+    if (!file) {
+        if (fileInfo) fileInfo.style.display = 'none';
+        return false;
+    }
+    
+    // Check file size
+    if (file.size > MAX_FILE_SIZE) {
+        if (fileError) fileError.textContent = 'File quá lớn. Kích thước tối đa là 10MB.';
+        input.value = '';
+        if (fileInfo) fileInfo.style.display = 'none';
+        return false;
+    }
+    
+    // Check file type
+    const fileExt = file.name.split('.').pop().toLowerCase();
+        if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
+        if (fileError) fileError.textContent = 'Loại file không được hỗ trợ. Chỉ chấp nhận: PDF, DOC, DOCX, JPG, JPEG, PNG.';
+        input.value = '';
+        if (fileInfo) fileInfo.style.display = 'none';
+        return false;
+    }
+    
+    // Show file info
+    if (fileInfo && fileName && fileSize) {
+        fileName.textContent = file.name;
+        fileSize.textContent = `(${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+        fileInfo.style.display = 'flex';
+    }
+    
+    return true;
+}
+
+function previewDocument(filePath, title) {
+    const previewModal = document.getElementById('previewModal');
+    const previewTitle = document.getElementById('previewTitle');
+    const previewContent = document.getElementById('previewContent');
+    const previewDownloadLink = document.getElementById('previewDownloadLink');
+    
+    previewTitle.innerHTML = `<i class="fas fa-eye"></i> ${title}`;
+    
+    const fileUrl = filePath.startsWith('/') ? filePath : '/' + filePath;
+    previewDownloadLink.href = fileUrl;
+    
+    previewContent.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i><p>Đang tải...</p></div>';
+    previewModal.style.display = 'block';
+    
+    const fileExt = filePath.split('.').pop().toLowerCase();
+    
+    if (fileExt === 'pdf') {
+        previewContent.innerHTML = `<iframe src="${fileUrl}#toolbar=1" style="width: 100%; height: 75vh; border: none; border-radius: 4px;"></iframe>`;
+    } else if (['jpg', 'jpeg', 'png', 'gif'].includes(fileExt)) {
+        previewContent.innerHTML = `
+            <div class="image-preview-container">
+                <img src="${fileUrl}" alt="${title}" id="previewImage" onload="centerImage()">
+                <div class="image-controls">
+                    <button onclick="zoomImage(1.2)" class="btn-icon" title="Phóng to"><i class="fas fa-search-plus"></i></button>
+                    <button onclick="zoomImage(0.8)" class="btn-icon" title="Thu nhỏ"><i class="fas fa-search-minus"></i></button>
+                    <button onclick="resetImageZoom()" class="btn-icon" title="Đặt lại"><i class="fas fa-redo"></i></button>
+                </div>
+            </div>
+        `;
+    } else {
+        previewContent.innerHTML = `
+            <div class="unsupported-preview">
+                <i class="fas fa-file" style="font-size: 64px; color: #667eea; margin-bottom: 20px;"></i>
+                <p style="font-size: 18px; margin-bottom: 10px;">Không thể xem trước loại file này</p>
+                <p style="color: #666;">Vui lòng tải xuống để xem</p>
+            </div>
+        `;
+    }
+}
+
+let imageZoom = 1;
+function zoomImage(factor) {
+    const img = document.getElementById('previewImage');
+    if (img) {
+        imageZoom *= factor;
+        img.style.transform = `scale(${imageZoom})`;
+        img.style.transition = 'transform 0.3s ease';
+    }
+}
+
+function resetImageZoom() {
+    const img = document.getElementById('previewImage');
+    if (img) {
+        imageZoom = 1;
+        img.style.transform = 'scale(1)';
+    }
+}
+
+function centerImage() {
+    const img = document.getElementById('previewImage');
+    if (img) {
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '75vh';
+        img.style.display = 'block';
+        img.style.margin = '0 auto';
+    }
+}
+
+function updateDocumentTypeOptions() {
+    const select = document.getElementById('uploadDocumentType');
+    const customInput = document.getElementById('uploadDocumentTypeCustom');
+    const taxPeriodGroup = document.getElementById('taxPeriodGroup');
+    const category = document.getElementById('uploadCategory').value;
+    
+    if (select.value === 'Other') {
+        customInput.style.display = 'block';
+        customInput.required = true;
+        select.required = false;
+    } else {
+        customInput.style.display = 'none';
+        customInput.required = false;
+        select.required = true;
+    }
+    
+    const taxDocumentTypes = ['Tax Declarations', 'Invoice Files (PDF/XML)', 'Accounting Books',
+                             'Tax Payment Receipts', 'Tax Submission Confirmations'];
+    if (category === 'tax' || taxDocumentTypes.includes(select.value)) {
+        taxPeriodGroup.style.display = 'block';
+    } else {
+        taxPeriodGroup.style.display = 'none';
+    }
+}
+
+function toggleDeadlineField() {
+    const checkbox = document.getElementById('uploadHasDeadline');
+    const deadlineGroup = document.getElementById('deadlineGroup');
+    deadlineGroup.style.display = checkbox.checked ? 'block' : 'none';
+    if (!checkbox.checked) {
+        document.getElementById('uploadExpiryDate').value = '';
+    }
+}
+
+function toggleEditDeadlineField() {
+    const checkbox = document.getElementById('editHasDeadline');
+    const deadlineGroup = document.getElementById('editDeadlineGroup');
+    deadlineGroup.style.display = checkbox.checked ? 'block' : 'none';
+    if (!checkbox.checked) {
+        document.getElementById('editExpiryDate').value = '';
+    }
+}
+
+function updateEditDocumentTypeOptions() {
+    const select = document.getElementById('editDocumentType');
+    const customInput = document.getElementById('editDocumentTypeCustom');
+    if (select.value === 'Other') {
+        customInput.style.display = 'block';
+        customInput.required = true;
+        select.required = false;
+    } else {
+        customInput.style.display = 'none';
+        customInput.required = false;
+        select.required = true;
+    }
+}
+
+function openUploadModal() {
+    const form = document.getElementById('uploadForm');
+    form.reset();
+    document.getElementById('uploadModal').style.display = 'block';
+    document.getElementById('taxPeriodGroup').style.display = 'none';
+    document.getElementById('deadlineGroup').style.display = 'none';
+    document.getElementById('uploadHasDeadline').checked = false;
+    document.getElementById('fileInfo').style.display = 'none';
+    
+    // Clear errors
+    document.querySelectorAll('.field-error').forEach(el => el.textContent = '');
+    
+    document.getElementById('uploadCategory').addEventListener('change', function() {
+        updateDocumentTypeOptions();
+    });
+}
+
+function openEditModal(documentId) {
+    fetch(`/api/documents/${documentId}`)
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                const doc = result.data;
+                document.getElementById('editDocumentId').value = doc.id;
+                document.getElementById('editCategory').value = doc.category;
+                
+                const documentTypeSelect = document.getElementById('editDocumentType');
+                const documentTypeCustom = document.getElementById('editDocumentTypeCustom');
+                const predefinedTypes = ['Company Charter', 'Business License (GPKD)', 'Shareholder ID', 
+                    'Company Organization Chart', 'Internal Regulations', 'Capital Contribution Documents', 
+                    'Internal Decisions', 'Company Logo', 'Job Application Files', 'Labor Contracts',
+                    'Salary & Bonus Regulations', 'Salary Scale Decisions', 'Timekeeping Sheets',
+                    'Salary Confirmation Sheets', 'Customer / Partner Contracts', 'Tax Declarations',
+                    'Invoice Files (PDF/XML)', 'Accounting Books', 'Tax Payment Receipts', 
+                    'Tax Submission Confirmations'];
+                
+                if (predefinedTypes.includes(doc.document_type)) {
+                    documentTypeSelect.value = doc.document_type;
+                    documentTypeCustom.style.display = 'none';
+                    documentTypeCustom.value = '';
+                } else {
+                    documentTypeSelect.value = 'Other';
+                    documentTypeCustom.style.display = 'block';
+                    documentTypeCustom.value = doc.document_type;
+                }
+                
+                const taxDocumentTypes = ['Tax Declarations', 'Invoice Files (PDF/XML)', 'Accounting Books', 
+                                         'Tax Payment Receipts', 'Tax Submission Confirmations'];
+                const taxPeriodGroup = document.getElementById('editTaxPeriodGroup');
+                if (doc.category === 'tax' || taxDocumentTypes.includes(doc.document_type)) {
+                    taxPeriodGroup.style.display = 'block';
+                    if (doc.issued_date) {
+                        const issuedDate = new Date(doc.issued_date);
+                        document.getElementById('editTaxPeriodMonth').value = issuedDate.getMonth() + 1;
+                        document.getElementById('editTaxPeriodYear').value = issuedDate.getFullYear();
+                    }
+                } else {
+                    taxPeriodGroup.style.display = 'none';
+                }
+                
+                const hasDeadline = doc.expiry_date ? true : false;
+                document.getElementById('editHasDeadline').checked = hasDeadline;
+                toggleEditDeadlineField();
+                if (hasDeadline && doc.expiry_date) {
+                    document.getElementById('editExpiryDate').value = doc.expiry_date.split('T')[0];
+                }
+                
+                const entityType = doc.related_entity_type || '';
+                document.getElementById('editRelatedEntityType').value = entityType;
+                updateEditRelatedEntitySelection();
+                
+                if (entityType === 'employee') {
+                    document.getElementById('editRelatedEmployeeId').value = doc.related_entity_id || '';
+                } else if (entityType === 'partner') {
+                    const notes = doc.notes || '';
+                    const partnerMatch = notes.match(/Đối tác\/Khách hàng:\s*(.+)/);
+                    if (partnerMatch) {
+                        document.getElementById('editPartnerName').value = partnerMatch[1].trim();
+                    }
+                } else if (entityType) {
+                    document.getElementById('editRelatedEntityId').value = doc.related_entity_id || '';
+                }
+                
+                document.getElementById('editTitle').value = doc.title;
+                document.getElementById('editIssuedDate').value = doc.issued_date ? doc.issued_date.split('T')[0] : '';
+                document.getElementById('editExpiryDate').value = doc.expiry_date ? doc.expiry_date.split('T')[0] : '';
+                document.getElementById('editStatus').value = doc.status;
+                document.getElementById('editDescription').value = doc.description || '';
+                document.getElementById('editNotes').value = doc.notes || '';
+                document.getElementById('editModal').style.display = 'block';
+            } else {
+                alert('Lỗi khi tải thông tin tài liệu: ' + result.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Lỗi khi tải thông tin tài liệu');
+        });
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+function validateUploadForm() {
+    let isValid = true;
+    
+    // Clear previous errors
+    document.querySelectorAll('.field-error').forEach(el => el.textContent = '');
+    
+    // Validate category
+    const category = document.getElementById('uploadCategory').value;
+    if (!category) {
+        document.getElementById('categoryError').textContent = 'Vui lòng chọn danh mục';
+        isValid = false;
+    }
+    
+    // Validate document type
+    const docType = document.getElementById('uploadDocumentType').value;
+    const docTypeCustom = document.getElementById('uploadDocumentTypeCustom').value;
+    if (!docType || (docType === 'Other' && !docTypeCustom.trim())) {
+        document.getElementById('documentTypeError').textContent = 'Vui lòng chọn hoặc nhập loại tài liệu';
+        isValid = false;
+    }
+    
+    // Validate title
+    const title = document.getElementById('uploadTitle').value.trim();
+    if (!title) {
+        document.getElementById('titleError').textContent = 'Vui lòng nhập tiêu đề';
+        isValid = false;
+    }
+    
+    // Validate file
+    const file = document.getElementById('uploadFile').files[0];
+    if (!file) {
+        document.getElementById('fileError').textContent = 'Vui lòng chọn file';
+        isValid = false;
+    } else if (!validateFileUpload(document.getElementById('uploadFile'))) {
+        isValid = false;
+    }
+    
+    return isValid;
+}
+
+function uploadDocument() {
+    if (!validateUploadForm()) {
+        return;
+    }
+    
+    const form = document.getElementById('uploadForm');
+    const formData = new FormData(form);
+    
+    const documentTypeSelect = document.getElementById('uploadDocumentType');
+    const documentTypeCustom = document.getElementById('uploadDocumentTypeCustom');
+    if (documentTypeSelect.value === 'Other' && documentTypeCustom.value) {
+        formData.set('document_type', documentTypeCustom.value);
+    }
+    
+    const taxPeriodMonth = document.getElementById('uploadTaxPeriodMonth').value;
+    const taxPeriodYear = document.getElementById('uploadTaxPeriodYear').value;
+    if (taxPeriodMonth && taxPeriodYear && !formData.get('issued_date')) {
+        const monthStr = String(taxPeriodMonth).padStart(2, '0');
+        const issuedDate = `${taxPeriodYear}-${monthStr}-01`;
+        formData.set('issued_date', issuedDate);
+    }
+    
+    const hasDeadline = document.getElementById('uploadHasDeadline').checked;
+    if (!hasDeadline) {
+        formData.delete('expiry_date');
+    }
+    
+    const entityType = document.getElementById('uploadRelatedEntityType').value;
+    if (entityType === 'partner') {
+        const partnerName = document.getElementById('uploadPartnerName').value;
+        if (partnerName) {
+            const existingNotes = formData.get('notes') || '';
+            formData.set('notes', existingNotes ? `${existingNotes}\nĐối tác/Khách hàng: ${partnerName}` : `Đối tác/Khách hàng: ${partnerName}`);
+            formData.set('related_entity_id', '0');
+        }
+    }
+    
+    if (entityType === 'employee') {
+        const employeeId = document.getElementById('uploadRelatedEmployeeId').value;
+        formData.set('related_entity_id', employeeId);
+    }
+    
+    // Show loading state
+    const submitBtn = event.target;
+    const originalText = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tải lên...';
+    
+    fetch('/api/documents', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            alert('Tải lên tài liệu thành công');
+            closeModal('uploadModal');
+            location.reload();
+        } else {
+            alert('Lỗi: ' + result.message);
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Lỗi khi tải lên tài liệu');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    });
+}
+
+function updateDocument() {
+    const documentId = document.getElementById('editDocumentId').value;
+    const form = document.getElementById('editForm');
+    const formData = new FormData(form);
+    
+    const documentTypeSelect = document.getElementById('editDocumentType');
+    const documentTypeCustom = document.getElementById('editDocumentTypeCustom');
+    if (documentTypeSelect.value === 'Other' && documentTypeCustom.value) {
+        formData.set('document_type', documentTypeCustom.value);
+    }
+    
+    const taxPeriodMonth = document.getElementById('editTaxPeriodMonth').value;
+    const taxPeriodYear = document.getElementById('editTaxPeriodYear').value;
+    if (taxPeriodMonth && taxPeriodYear) {
+        if (!formData.get('issued_date')) {
+            const monthStr = String(taxPeriodMonth).padStart(2, '0');
+            const issuedDate = `${taxPeriodYear}-${monthStr}-01`;
+            formData.set('issued_date', issuedDate);
+        }
+    }
+    
+    const hasDeadline = document.getElementById('editHasDeadline').checked;
+    if (!hasDeadline) {
+        formData.delete('expiry_date');
+    }
+    
+    const entityType = document.getElementById('editRelatedEntityType').value;
+    if (entityType === 'partner') {
+        const partnerName = document.getElementById('editPartnerName').value;
+        if (partnerName) {
+            let existingNotes = formData.get('notes') || '';
+            existingNotes = existingNotes.replace(/Đối tác\/Khách hàng:\s*.+/g, '').trim();
+            formData.set('notes', existingNotes ? `${existingNotes}\nĐối tác/Khách hàng: ${partnerName}` : `Đối tác/Khách hàng: ${partnerName}`);
+            formData.set('related_entity_id', '0');
+        }
+    }
+    
+    if (entityType === 'employee') {
+        const employeeId = document.getElementById('editRelatedEmployeeId').value;
+        formData.set('related_entity_id', employeeId);
+    }
+    
+    const submitBtn = event.target;
+    const originalText = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang lưu...';
+    
+    fetch(`/api/documents/${documentId}`, {
+        method: 'PUT',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            alert('Cập nhật tài liệu thành công');
+            closeModal('editModal');
+            location.reload();
+        } else {
+            alert('Lỗi: ' + result.message);
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Lỗi khi cập nhật tài liệu');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    });
+}
+
+function deleteDocument(documentId, title) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa tài liệu "${title}"?`)) {
+        return;
+    }
+    
+    fetch(`/api/documents/${documentId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            alert('Xóa tài liệu thành công');
+            location.reload();
+        } else {
+            alert('Lỗi: ' + result.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Lỗi khi xóa tài liệu');
+    });
+}
+
+function updateRelatedEntitySelection() {
+    const entityType = document.getElementById('uploadRelatedEntityType').value;
+    const employeeGroup = document.getElementById('relatedEmployeeGroup');
+    const partnerGroup = document.getElementById('relatedPartnerGroup');
+    const entityIdGroup = document.getElementById('relatedEntityIdGroup');
+    
+    employeeGroup.style.display = 'none';
+    partnerGroup.style.display = 'none';
+    entityIdGroup.style.display = 'none';
+    
+    if (entityType === 'employee') {
+        employeeGroup.style.display = 'block';
+    } else if (entityType === 'partner') {
+        partnerGroup.style.display = 'block';
+    } else if (entityType === 'vehicle' || entityType === 'company') {
+        entityIdGroup.style.display = 'block';
+    }
+}
+
+function updateEditRelatedEntitySelection() {
+    const entityType = document.getElementById('editRelatedEntityType').value;
+    const employeeGroup = document.getElementById('editRelatedEmployeeGroup');
+    const partnerGroup = document.getElementById('editRelatedPartnerGroup');
+    const entityIdGroup = document.getElementById('editRelatedEntityIdGroup');
+    
+    employeeGroup.style.display = 'none';
+    partnerGroup.style.display = 'none';
+    entityIdGroup.style.display = 'none';
+    
+    if (entityType === 'employee') {
+        employeeGroup.style.display = 'block';
+    } else if (entityType === 'partner') {
+        partnerGroup.style.display = 'block';
+    } else if (entityType === 'vehicle' || entityType === 'company') {
+        entityIdGroup.style.display = 'block';
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+}
+</script>
+
+<style>
+.category-tabs-wrapper {
+    margin-bottom: 24px;
+    background: white;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.category-tabs {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border: 2px solid #e1e8ed;
+    background: white;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s;
+    font-weight: 500;
+    color: #555;
+}
+
+.tab-btn:hover {
+    background: #f8f9fa;
+    border-color: #667eea;
+    transform: translateY(-2px);
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #667eea;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.tab-btn i {
+    font-size: 16px;
+}
+
+.tab-count {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.tab-btn:not(.active) .tab-count {
+    background: #e1e8ed;
+    color: #555;
+}
+
+.filters-container {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 20px;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.filter-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    font-size: 14px;
+    color: #495057;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    background-color: #fff;
+    margin: 3% auto;
+    padding: 0;
+    border: none;
+    width: 90%;
+    max-width: 600px;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    animation: modalSlideIn 0.3s ease;
+}
+
+.modal-large {
+    max-width: 800px;
+}
+
+.modal-preview {
+    max-width: 95%;
+    width: 95%;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-50px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-header {
+    padding: 20px 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.close {
+    color: white;
+    font-size: 32px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+    transition: opacity 0.2s;
+}
+
+.close:hover {
+    opacity: 0.7;
+}
+
+.modal-body {
+    padding: 24px;
+    max-height: 75vh;
+    overflow-y: auto;
+}
+
+.modal-footer {
+    padding: 20px 24px;
+    border-top: 1px solid #e1e8ed;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background: #f8f9fa;
+    border-radius: 0 0 12px 12px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #495057;
+    font-size: 14px;
+}
+
+.form-control {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.required {
+    color: #dc3545;
+}
+
+.field-error {
+    display: block;
+    color: #dc3545;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.file-upload-wrapper {
+    position: relative;
+}
+
+.file-input {
+    cursor: pointer;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.file-info i {
+    color: #667eea;
+}
+
+.preview-body {
+    padding: 0;
+    background: #f8f9fa;
+    min-height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.preview-content {
+    width: 100%;
+    height: 100%;
+    min-height: 75vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.loading-spinner {
+    text-align: center;
+    color: #667eea;
+}
+
+.loading-spinner i {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.loading-spinner p {
+    font-size: 16px;
+    color: #666;
+}
+
+.image-preview-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.image-preview-container img {
+    max-width: 100%;
+    max-height: 75vh;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    cursor: zoom-in;
+}
+
+.image-controls {
+    margin-top: 16px;
+    display: flex;
+    gap: 8px;
+}
+
+.btn-icon {
+    padding: 8px 12px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-icon:hover {
+    background: #f8f9fa;
+    border-color: #667eea;
+    color: #667eea;
+}
+
+.unsupported-preview {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.badge-legal {
+    background-color: #17a2b8;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.badge-administrative {
+    background-color: #28a745;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.badge-tax {
+    background-color: #ffc107;
+    color: #333;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.expired-date {
+    color: #dc3545;
+    font-weight: 600;
+}
+
+.status-badge {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.status-active {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-expired {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.status-archived {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+@media (max-width: 768px) {
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .category-tabs {
+        flex-direction: column;
+    }
+    
+    .tab-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .modal-content {
+        width: 95%;
+        margin: 5% auto;
+    }
+}
+</style>
+{% endblock %}

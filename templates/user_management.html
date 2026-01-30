@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý người dùng - RBAC{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+    <div class="page-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <h2>👥 Quản lý người dùng</h2>
+                <p>Quản lý người dùng và gán vai trò</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <a href="/role-management" class="btn btn-secondary btn-lg">
+                    <i class="fas fa-user-tag"></i> Quản lý vai trò
+                </a>
+                <button type="button" class="btn btn-primary btn-lg" onclick="openAddUserModal()">
+                    <i class="fas fa-user-plus"></i> Thêm người dùng
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="table-section">
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Username</th>
+                        <th>Họ tên</th>
+                        <th>Email</th>
+                        <th>Vai trò</th>
+                        <th>Trạng thái</th>
+                        <th>Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <tr>
+                        <td colspan="7" style="text-align: center;">Đang tải...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add User Modal -->
+<div id="addUserModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Thêm người dùng</h3>
+            <span class="close" onclick="closeModal('addUserModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="addUserForm">
+                <div class="form-group">
+                    <label>Username <span class="required">*</span></label>
+                    <input type="text" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label>Mật khẩu <span class="required">*</span></label>
+                    <input type="password" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label>Họ tên</label>
+                    <input type="text" name="full_name">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email">
+                </div>
+                <div class="form-group">
+                    <label>Vai trò <span class="required">*</span></label>
+                    <select name="role_ids" multiple id="addUserRoles" required>
+                        <!-- Populated by JavaScript -->
+                    </select>
+                    <small>Giữ Ctrl/Cmd để chọn nhiều vai trò</small>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('addUserModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="saveUser()">Lưu</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit User Roles Modal -->
+<div id="editRolesModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Gán vai trò cho: <span id="editRolesUsername"></span></h3>
+            <span class="close" onclick="closeModal('editRolesModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Vai trò</label>
+                <select multiple id="editRolesSelect" style="min-height: 200px;">
+                    <!-- Populated by JavaScript -->
+                </select>
+                <small>Giữ Ctrl/Cmd để chọn nhiều vai trò</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('editRolesModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="saveUserRoles()">Lưu</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let users = [];
+let roles = [];
+let currentEditUserId = null;
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadUsers();
+    loadRoles();
+});
+
+async function loadUsers() {
+    try {
+        const response = await fetch('/api/users');
+        const result = await response.json();
+        if (result.success) {
+            users = result.data;
+            renderUsers();
+        } else {
+            alert('Lỗi khi tải danh sách người dùng: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error loading users:', error);
+        alert('Lỗi khi tải danh sách người dùng');
+    }
+}
+
+async function loadRoles() {
+    try {
+        const response = await fetch('/api/roles');
+        const result = await response.json();
+        if (result.success) {
+            roles = result.data;
+            populateRoleSelects();
+        } else {
+            alert('Lỗi khi tải danh sách vai trò: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error loading roles:', error);
+        alert('Lỗi khi tải danh sách vai trò');
+    }
+}
+
+function renderUsers() {
+    const tbody = document.getElementById('usersTableBody');
+    if (users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Không có dữ liệu</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = users.map((user, index) => {
+        const roleNames = user.roles.map(r => r.name).join(', ') || 'Chưa có vai trò';
+        const statusBadge = user.is_locked 
+            ? '<span class="status-badge status-locked">🔒 Khoá</span>'
+            : `<span class="status-badge status-${user.status.toLowerCase()}">${user.status}</span>`;
+        
+        return `
+            <tr>
+                <td>${index + 1}</td>
+                <td><strong>${user.username}</strong></td>
+                <td>${user.full_name || '-'}</td>
+                <td>${user.email || '-'}</td>
+                <td>${roleNames}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <div class="action-buttons">
+                        <button type="button" class="btn btn-sm btn-primary" onclick="openEditRolesModal(${user.id}, '${user.username}')" title="Gán vai trò">
+                            <i class="fas fa-user-tag"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function populateRoleSelects() {
+    // Populate add user roles select
+    const addSelect = document.getElementById('addUserRoles');
+    if (addSelect) {
+        addSelect.innerHTML = roles.map(r => 
+            `<option value="${r.id}">${r.name}${r.is_system_role ? ' (Hệ thống)' : ''}</option>`
+        ).join('');
+    }
+    
+    // Populate edit roles select
+    const editSelect = document.getElementById('editRolesSelect');
+    if (editSelect) {
+        editSelect.innerHTML = roles.map(r => 
+            `<option value="${r.id}">${r.name}${r.is_system_role ? ' (Hệ thống)' : ''}</option>`
+        ).join('');
+    }
+}
+
+function openAddUserModal() {
+    document.getElementById('addUserForm').reset();
+    document.getElementById('addUserModal').style.display = 'block';
+}
+
+function openEditRolesModal(userId, username) {
+    currentEditUserId = userId;
+    document.getElementById('editRolesUsername').textContent = username;
+    
+    // Get user's current roles
+    const user = users.find(u => u.id === userId);
+    const userRoleIds = user ? user.roles.map(r => r.id) : [];
+    
+    // Set selected roles
+    const select = document.getElementById('editRolesSelect');
+    Array.from(select.options).forEach(option => {
+        option.selected = userRoleIds.includes(parseInt(option.value));
+    });
+    
+    document.getElementById('editRolesModal').style.display = 'block';
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+async function saveUser() {
+    const form = document.getElementById('addUserForm');
+    const formData = new FormData(form);
+    
+    const username = formData.get('username');
+    const password = formData.get('password');
+    const full_name = formData.get('full_name');
+    const email = formData.get('email');
+    const roleIds = Array.from(document.getElementById('addUserRoles').selectedOptions).map(o => parseInt(o.value));
+    
+    if (!username || !password || roleIds.length === 0) {
+        alert('Vui lòng điền đầy đủ thông tin');
+        return;
+    }
+    
+    try {
+        // Create user via existing endpoint
+        const createResponse = await fetch('/accounts/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+                username: username,
+                password: password,
+                full_name: full_name || '',
+                email: email || '',
+                role: 'User', // Default role for backward compatibility
+                status: 'Active'
+            })
+        });
+        
+        const createResult = await createResponse.json();
+        if (!createResult.success) {
+            alert('Lỗi khi tạo người dùng: ' + createResult.message);
+            return;
+        }
+        
+        // Get the created user ID (you may need to adjust this based on your API response)
+        // For now, reload users and assign roles
+        await loadUsers();
+        const newUser = users.find(u => u.username === username);
+        
+        if (newUser) {
+            // Assign roles
+            await assignRoles(newUser.id, roleIds);
+        }
+        
+        closeModal('addUserModal');
+        alert('Thêm người dùng thành công');
+    } catch (error) {
+        console.error('Error saving user:', error);
+        alert('Lỗi khi thêm người dùng');
+    }
+}
+
+async function saveUserRoles() {
+    if (!currentEditUserId) return;
+    
+    const select = document.getElementById('editRolesSelect');
+    const roleIds = Array.from(select.selectedOptions).map(o => parseInt(o.value));
+    
+    await assignRoles(currentEditUserId, roleIds);
+    closeModal('editRolesModal');
+    await loadUsers();
+    alert('Cập nhật vai trò thành công');
+}
+
+async function assignRoles(userId, roleIds) {
+    try {
+        const response = await fetch(`/api/users/${userId}/roles`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({role_ids: roleIds})
+        });
+        
+        const result = await response.json();
+        if (!result.success) {
+            alert('Lỗi khi gán vai trò: ' + result.message);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        console.error('Error assigning roles:', error);
+        alert('Lỗi khi gán vai trò');
+        return false;
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+}
+</script>
+
+<style>
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 5% auto;
+    padding: 0;
+    border: 1px solid #888;
+    width: 90%;
+    max-width: 600px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.modal-header {
+    padding: 20px;
+    background-color: #667eea;
+    color: white;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.close {
+    color: white;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    opacity: 0.7;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.modal-footer {
+    padding: 20px;
+    border-top: 1px solid #ddd;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.form-group select[multiple] {
+    min-height: 150px;
+}
+
+.required {
+    color: red;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 5px;
+}
+</style>
+{% endblock %}
+

@@ -3,12 +3,7 @@
 {% block title %}Bảng Tính Lương Ver 2.0 - Hệ thống quản lý vận chuyển{% endblock %}
 
 {% block content %}
-<div class="page-wrapper">
-    <div class="page-header">
-        <h2>💰 Bảng Tính Lương Ver 2.0</h2>
-        <p>Tra cứu và tính lương chuyến theo khoảng thời gian và lái xe</p>
-    </div>
-
+<div class="page-wrapper" style="margin: 0; padding: 20px;">
     <!-- Tab Navigation -->
     <div style="margin-bottom: 25px;">
         <div class="sheet-tabs">
@@ -20,11 +15,21 @@
                     onclick="switchTab('partner')" id="tab-partner">
                 🚚 Xe đối tác
             </button>
+            <button type="button" class="sheet-tab {% if current_tab == 'summary' %}active{% endif %}" 
+                    onclick="switchTab('summary')" id="tab-summary">
+                📊 Bảng lương tổng
+            </button>
         </div>
     </div>
 
+    <!-- Tab Summary Content -->
+    <div id="summaryTabContent" style="display: {% if current_tab == 'summary' %}block{% else %}none{% endif %}; margin-top: 20px;">
+        <iframe src="/salary-summary?embed=1" style="width: 100%; height: calc(100vh - 300px); border: none; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></iframe>
+    </div>
+    
+    {% if current_tab != 'summary' %}
     <!-- Form tìm kiếm -->
-    <div class="card" style="padding: 25px; margin-bottom: 25px;">
+    <div class="card" style="padding: 25px; margin-bottom: 25px;" id="searchFormContainer">
         <h3 class="section-title" style="margin-top: 0;">🔍 Điều kiện tìm kiếm</h3>
         <form method="GET" action="/salary-calculation-v2" id="searchForm">
             <input type="hidden" id="tab" name="tab" value="{{ current_tab if current_tab else 'driver' }}">
@@ -250,6 +255,19 @@
                             </td>
                         </tr>
                         {% endfor %}
+                        {% if current_tab == 'driver' and results and total_driver_trip_salary is defined %}
+                        <tr style="background-color: #e8f5e9; font-weight: bold; border-top: 2px solid #2e7d32;">
+                            <td colspan="6" style="text-align: right; padding-right: 20px;">
+                                <strong>Tổng cộng:</strong>
+                            </td>
+                            <td colspan="2"></td>
+                            <td colspan="2"></td>
+                            <td style="text-align: center; color: #1b5e20; font-size: 15px; padding: 12px;">
+                                <strong>{{ "{:,.0f}".format(total_driver_trip_salary) }} VNĐ</strong>
+                            </td>
+                            <td></td>
+                        </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
@@ -269,6 +287,7 @@
         </div>
     {% endif %}
     </div>
+    {% endif %}
 </div>
 
 <style>
@@ -367,6 +386,48 @@ function switchTab(tabName) {
     });
     document.getElementById('tab-' + tabName).classList.add('active');
     
+    // Xử lý tab summary
+    const summaryTabContent = document.getElementById('summaryTabContent');
+    const searchFormContainer = document.getElementById('searchFormContainer');
+    const resultsSection = document.getElementById('resultsSection');
+    const loadingState = document.getElementById('loadingState');
+    
+    if (tabName === 'summary') {
+        // Hiển thị iframe summary, ẩn form và results
+        if (summaryTabContent) {
+            summaryTabContent.style.display = 'block';
+        }
+        if (searchFormContainer) {
+            searchFormContainer.style.display = 'none';
+        }
+        if (resultsSection) {
+            resultsSection.style.display = 'none';
+        }
+        if (loadingState) {
+            loadingState.style.display = 'none';
+        }
+        // Update URL without reload
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', 'summary');
+        window.history.pushState({}, '', url);
+        return;
+    } else {
+        // Ẩn summary, hiển thị form và results
+        if (summaryTabContent) {
+            summaryTabContent.style.display = 'none';
+        }
+        if (searchFormContainer) {
+            searchFormContainer.style.display = 'block';
+        }
+        if (resultsSection) {
+            resultsSection.style.display = 'block';
+        }
+        // Update URL without reload
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', tabName);
+        window.history.pushState({}, '', url);
+    }
+    
     // Hiển thị/ẩn driver_name và license_plate fields
     const driverNameGroup = document.getElementById('driver_name_group');
     const licensePlateGroup = document.getElementById('license_plate_group');
@@ -381,7 +442,6 @@ function switchTab(tabName) {
     }
     
     // Khi đổi tab, chỉ cập nhật UI, không tự động gọi tìm kiếm
-    const resultsSection = document.getElementById('resultsSection');
     if (resultsSection) {
         resultsSection.innerHTML = `
             <div class="card" style="padding: 25px; text-align: center;">
@@ -477,4 +537,5 @@ document.getElementById('searchForm').addEventListener('submit', function(e) {
 });
 </script>
 {% endblock %}
+
 

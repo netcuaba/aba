@@ -1,0 +1,550 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý vai trò - RBAC{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+    <div class="page-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <h2>🏷️ Quản lý vai trò và phân quyền</h2>
+                <p>Quản lý vai trò và ma trận phân quyền</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <a href="/user-management" class="btn btn-secondary btn-lg">
+                    <i class="fas fa-users"></i> Quản lý người dùng
+                </a>
+                <button type="button" class="btn btn-primary btn-lg" onclick="openAddRoleModal()">
+                    <i class="fas fa-plus"></i> Thêm vai trò
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Roles List -->
+    <div class="table-section">
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Tên vai trò</th>
+                        <th>Mô tả</th>
+                        <th>Loại</th>
+                        <th>Số quyền</th>
+                        <th>Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody id="rolesTableBody">
+                    <tr>
+                        <td colspan="6" style="text-align: center;">Đang tải...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add Role Modal -->
+<div id="addRoleModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Thêm vai trò mới</h3>
+            <span class="close" onclick="closeModal('addRoleModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="addRoleForm">
+                <div class="form-group">
+                    <label>Tên vai trò <span class="required">*</span></label>
+                    <input type="text" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label>Mô tả</label>
+                    <textarea name="description" rows="3"></textarea>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('addRoleModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="saveRole()">Lưu</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Role Permissions Modal -->
+<div id="editPermissionsModal" class="modal">
+    <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-header">
+            <h3>Phân quyền cho: <span id="editPermissionsRoleName"></span></h3>
+            <span class="close" onclick="closeModal('editPermissionsModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="permissionsMatrix">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('editPermissionsModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="saveRolePermissions()">Lưu</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let roles = [];
+let permissions = [];
+let currentEditRoleId = null;
+let selectedPermissions = new Set();
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadRoles();
+    loadPermissions();
+});
+
+async function loadRoles() {
+    try {
+        const response = await fetch('/api/roles');
+        const result = await response.json();
+        if (result.success) {
+            roles = result.data;
+            await Promise.all(roles.map(async (role) => {
+                const permResponse = await fetch(`/api/roles/${role.id}/permissions`);
+                const permResult = await permResponse.json();
+                if (permResult.success) {
+                    role.permission_count = permResult.data.permission_ids.length;
+                } else {
+                    role.permission_count = 0;
+                }
+            }));
+            renderRoles();
+        } else {
+            alert('Lỗi khi tải danh sách vai trò: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error loading roles:', error);
+        alert('Lỗi khi tải danh sách vai trò');
+    }
+}
+
+async function loadPermissions() {
+    try {
+        const response = await fetch('/api/permissions');
+        const result = await response.json();
+        if (result.success) {
+            permissions = result.data;
+        } else {
+            alert('Lỗi khi tải danh sách quyền: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error loading permissions:', error);
+        alert('Lỗi khi tải danh sách quyền');
+    }
+}
+
+function renderRoles() {
+    const tbody = document.getElementById('rolesTableBody');
+    if (roles.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Không có dữ liệu</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = roles.map((role, index) => {
+        const typeBadge = role.is_system_role 
+            ? '<span class="badge badge-info">Hệ thống</span>'
+            : '<span class="badge badge-secondary">Tùy chỉnh</span>';
+        
+        return `
+            <tr>
+                <td>${index + 1}</td>
+                <td><strong>${role.name}</strong></td>
+                <td>${role.description || '-'}</td>
+                <td>${typeBadge}</td>
+                <td>${role.permission_count || 0}</td>
+                <td>
+                    <div class="action-buttons">
+                        <button type="button" class="btn btn-sm btn-primary" onclick="openEditPermissionsModal(${role.id}, '${role.name}')" title="Phân quyền">
+                            <i class="fas fa-key"></i> Phân quyền
+                        </button>
+                        ${!role.is_system_role ? `
+                            <button type="button" class="btn btn-sm btn-info" onclick="openEditRoleModal(${role.id}, '${role.name}', '${role.description || ''}')" title="Sửa">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="deleteRole(${role.id}, '${role.name}')" title="Xóa">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function openAddRoleModal() {
+    document.getElementById('addRoleForm').reset();
+    document.getElementById('addRoleModal').style.display = 'block';
+}
+
+function openEditPermissionsModal(roleId, roleName) {
+    currentEditRoleId = roleId;
+    document.getElementById('editPermissionsRoleName').textContent = roleName;
+    
+    // Load current permissions
+    loadRolePermissions(roleId);
+    
+    // Render permissions matrix
+    renderPermissionsMatrix();
+    
+    document.getElementById('editPermissionsModal').style.display = 'block';
+}
+
+async function loadRolePermissions(roleId) {
+    try {
+        const response = await fetch(`/api/roles/${roleId}/permissions`);
+        const result = await response.json();
+        if (result.success) {
+            selectedPermissions = new Set(result.data.permission_ids);
+        } else {
+            selectedPermissions = new Set();
+        }
+    } catch (error) {
+        console.error('Error loading role permissions:', error);
+        selectedPermissions = new Set();
+    }
+}
+
+function renderPermissionsMatrix() {
+    const matrixDiv = document.getElementById('permissionsMatrix');
+    
+    if (permissions.length === 0) {
+        matrixDiv.innerHTML = '<p>Không có quyền nào được định nghĩa</p>';
+        return;
+    }
+    
+    // Group permissions by page
+    const pages = {};
+    permissions.forEach(page => {
+        pages[page.page_path] = page.permissions;
+    });
+    
+    let html = '<div class="permissions-matrix">';
+    
+    Object.keys(pages).forEach(pagePath => {
+        const pagePerms = pages[pagePath];
+        html += `
+            <div class="permission-page-section">
+                <h4>${getPageName(pagePath)}</h4>
+                <div class="permission-actions">
+        `;
+        
+        const actions = ['view', 'create', 'update', 'delete'];
+        actions.forEach(action => {
+            const perm = pagePerms.find(p => p.action === action);
+            if (perm) {
+                const isChecked = selectedPermissions.has(perm.id);
+                html += `
+                    <label class="permission-checkbox">
+                        <input type="checkbox" value="${perm.id}" ${isChecked ? 'checked' : ''} 
+                               onchange="togglePermission(${perm.id})">
+                        <span>${getActionLabel(action)}</span>
+                    </label>
+                `;
+            }
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    matrixDiv.innerHTML = html;
+}
+
+function togglePermission(permissionId) {
+    if (selectedPermissions.has(permissionId)) {
+        selectedPermissions.delete(permissionId);
+    } else {
+        selectedPermissions.add(permissionId);
+    }
+}
+
+function getPageName(pagePath) {
+    const pageNames = {
+        '/operations': 'Trips',
+        '/vehicles': 'Vehicles',
+        '/employees': 'Employees',
+        '/finance-report': 'Reports',
+        '/accounts': 'Administrative',
+        '/settings': 'System Settings',
+        '/timekeeping-v1': 'Timekeeping',
+        '/maintenance': 'Maintenance',
+        '/theo-doi-dau-v2': 'Fuel',
+        '/salary-calculation-v2': 'Salary'
+    };
+    return pageNames[pagePath] || pagePath;
+}
+
+function getActionLabel(action) {
+    const labels = {
+        'view': 'Xem',
+        'create': 'Tạo',
+        'update': 'Sửa',
+        'delete': 'Xóa'
+    };
+    return labels[action] || action;
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+async function saveRole() {
+    const form = document.getElementById('addRoleForm');
+    const formData = new FormData(form);
+    
+    const name = formData.get('name');
+    const description = formData.get('description') || '';
+    
+    if (!name) {
+        alert('Vui lòng nhập tên vai trò');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/roles', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, description})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            closeModal('addRoleModal');
+            await loadRoles();
+            alert('Thêm vai trò thành công');
+        } else {
+            alert('Lỗi: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error saving role:', error);
+        alert('Lỗi khi thêm vai trò');
+    }
+}
+
+async function saveRolePermissions() {
+    if (!currentEditRoleId) return;
+    
+    const permissionIds = Array.from(selectedPermissions);
+    
+    try {
+        const response = await fetch(`/api/roles/${currentEditRoleId}/permissions`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({permission_ids: permissionIds})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            closeModal('editPermissionsModal');
+            await loadRoles();
+            alert('Cập nhật phân quyền thành công');
+        } else {
+            alert('Lỗi: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error saving permissions:', error);
+        alert('Lỗi khi cập nhật phân quyền');
+    }
+}
+
+async function deleteRole(roleId, roleName) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa vai trò "${roleName}"?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/roles/${roleId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            await loadRoles();
+            alert('Xóa vai trò thành công');
+        } else {
+            alert('Lỗi: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error deleting role:', error);
+        alert('Lỗi khi xóa vai trò');
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+}
+</script>
+
+<style>
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 5% auto;
+    padding: 0;
+    border: 1px solid #888;
+    width: 90%;
+    max-width: 600px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.modal-header {
+    padding: 20px;
+    background-color: #667eea;
+    color: white;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.close {
+    color: white;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    opacity: 0.7;
+}
+
+.modal-body {
+    padding: 20px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.modal-footer {
+    padding: 20px;
+    border-top: 1px solid #ddd;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+.form-group input,
+.form-group textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.required {
+    color: red;
+}
+
+.permissions-matrix {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.permission-page-section {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.permission-page-section h4 {
+    margin: 0 0 15px 0;
+    color: #667eea;
+    font-size: 16px;
+}
+
+.permission-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.permission-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.permission-checkbox:hover {
+    background-color: #f5f5f5;
+}
+
+.permission-checkbox input[type="checkbox"] {
+    width: auto;
+    cursor: pointer;
+}
+
+.badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.badge-info {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.badge-secondary {
+    background-color: #6c757d;
+    color: white;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 5px;
+}
+</style>
+{% endblock %}
+

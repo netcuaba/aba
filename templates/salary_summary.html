@@ -1,0 +1,646 @@
+{% extends "base.html" %}
+
+{% block title %}Bảng Lương Tổng Theo Tháng - Hệ thống quản lý vận chuyển{% endblock %}
+
+{% block content %}
+<div class="page-wrapper" style="margin: 0; padding: {% if request.query_params.get('embed') %}15px{% else %}20px{% endif %}; position: relative; min-height: auto;">
+    {% if not request.query_params.get('embed') %}
+    <div class="page-header" style="margin-bottom: 20px;">
+        <div>
+            <h2>💰 Bảng Lương Tổng Theo Tháng</h2>
+            <p>Tổng hợp lương, ngày công, số chuyến và dầu khoán theo tháng</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Filter Form -->
+    <div class="card" style="padding: 20px; margin-bottom: 20px;">
+        <form method="GET" action="/salary-summary" id="filterForm">
+            {% if request.query_params.get('embed') %}
+            <input type="hidden" name="embed" value="1">
+            {% endif %}
+            <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                <div class="form-group" style="flex: 0 0 auto;">
+                    <label for="month">Chọn tháng <span class="required">*</span></label>
+                    <input type="month" id="month" name="month" value="{{ month }}" required class="form-control" style="width: 170px;">
+                </div>
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-search"></i> Xem bảng lương
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results Table -->
+    <div class="card" style="padding: 20px; position: relative; clear: both;">
+        {% if salary_data %}
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; padding-bottom: 15px; border-bottom: 2px solid #e1e8ed;">
+            <h3 style="margin: 0;">
+                {% set month_parts = month.split('-') %}
+                {% if month_parts|length == 2 %}
+                    📊 Bảng lương Tháng {{ month_parts[1] }}/{{ month_parts[0] }}
+                {% else %}
+                    📊 Bảng lương Tháng {{ month }}
+                {% endif %}
+                <span style="font-size: 14px; font-weight: normal; color: #666;">
+                    ({{ salary_data|length }} nhân viên)
+                </span>
+            </h3>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-primary" onclick="saveSalaryData()" id="saveBtn">
+                    <i class="fas fa-save"></i> Lưu
+                </button>
+                <button type="button" class="btn btn-success" onclick="exportToExcel()" id="exportBtn">
+                    <i class="fas fa-file-excel"></i> Xuất Excel
+                </button>
+            </div>
+        </div>
+        <div style="overflow-x: auto;">
+            <table class="data-table" id="salaryTable">
+                <thead>
+                    <tr>
+                        <th style="width: 50px;">STT</th>
+                        <th style="width: 120px; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Họ tên</th>
+                        <th style="width: 100px; text-align: center;">Ngày công</th>
+                        <th style="width: 100px; text-align: center;">Số chuyến</th>
+                        <th style="width: 130px; text-align: right;">Lương chuyến (VNĐ)</th>
+                        <th style="width: 130px; text-align: right;">Bảo hiểm XH (VNĐ)</th>
+                        <th style="width: 100px; text-align: right;">Rửa xe (VNĐ)</th>
+                        <th style="width: 140px; text-align: right;">Tiền trách nhiệm (VNĐ)</th>
+                        <th style="width: 120px; text-align: right;">Ứng lương (VNĐ)</th>
+                        <th style="width: 120px; text-align: right;">Sửa xe (VNĐ)</th>
+                        <th style="width: 130px; text-align: right;">Còn lại (VNĐ)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in salary_data %}
+                    {% set bao_hiem_xh = item.bao_hiem_xh|default(0) %}
+                    {% set rua_xe = item.rua_xe|default(0) %}
+                    {% set tien_trach_nhiem = item.tien_trach_nhiem|default(0) %}
+                    {% set ung_luong = item.ung_luong|default(0) %}
+                    {% set sua_xe = item.sua_xe|default(0) %}
+                    <tr data-row-index="{{ loop.index0 }}" data-trip-salary="{{ item.trip_salary }}" data-user-id="{{ item.user_id }}">
+                        <td style="text-align: center;">{{ loop.index }}</td>
+                        <td style="max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ item.full_name }}">
+                            <strong>{{ item.full_name }}</strong>
+                        </td>
+                        <td style="text-align: center;">{{ item.working_days }}</td>
+                        <td style="text-align: center;">{{ item.total_trips }}</td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace;">
+                            {{ "{:,.0f}".format(item.trip_salary) }}
+                        </td>
+                        <td style="text-align: right; padding: 4px;">
+                            <input type="text" 
+                                   class="salary-input" 
+                                   data-field="bao_hiem_xh"
+                                   data-row="{{ loop.index0 }}"
+                                   data-value="{{ bao_hiem_xh }}"
+                                   style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; text-align: right; font-family: 'Courier New', monospace; font-size: 13px;">
+                        </td>
+                        <td style="text-align: right; padding: 4px;">
+                            <input type="text" 
+                                   class="salary-input" 
+                                   data-field="rua_xe"
+                                   data-row="{{ loop.index0 }}"
+                                   data-value="{{ rua_xe }}"
+                                   style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; text-align: right; font-family: 'Courier New', monospace; font-size: 13px;">
+                        </td>
+                        <td style="text-align: right; padding: 4px;">
+                            <input type="text" 
+                                   class="salary-input" 
+                                   data-field="tien_trach_nhiem"
+                                   data-row="{{ loop.index0 }}"
+                                   data-value="{{ tien_trach_nhiem }}"
+                                   style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; text-align: right; font-family: 'Courier New', monospace; font-size: 13px;">
+                        </td>
+                        <td style="text-align: right; padding: 4px;">
+                            <input type="text" 
+                                   class="salary-input" 
+                                   data-field="ung_luong"
+                                   data-row="{{ loop.index0 }}"
+                                   data-value="{{ ung_luong }}"
+                                   style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; text-align: right; font-family: 'Courier New', monospace; font-size: 13px;">
+                        </td>
+                        <td style="text-align: right; padding: 4px;">
+                            <input type="text" 
+                                   class="salary-input" 
+                                   data-field="sua_xe"
+                                   data-row="{{ loop.index0 }}"
+                                   data-value="{{ sua_xe }}"
+                                   style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; text-align: right; font-family: 'Courier New', monospace; font-size: 13px;">
+                        </td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace; font-weight: bold; color: #1976d2; padding: 10px 8px;" class="con-lai-cell">
+                            <span class="con-lai-value">{{ "{:,.0f}".format(item.trip_salary - bao_hiem_xh - tien_trach_nhiem - ung_luong + rua_xe + sua_xe) }}</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    <!-- Total Row -->
+                    <tr style="background: #f8f9fa; font-weight: bold;" id="totalRow">
+                        <td colspan="2" style="text-align: right; padding-right: 20px;">TỔNG CỘNG:</td>
+                        <td style="text-align: center;">{{ totals.working_days }}</td>
+                        <td style="text-align: center;">{{ totals.total_trips }}</td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace;">
+                            {{ "{:,.0f}".format(totals.trip_salary) }}
+                        </td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace;" class="total-bao-hiem-xh">
+                            0
+                        </td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace;" class="total-rua-xe">
+                            0
+                        </td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace;" class="total-tien-trach-nhiem">
+                            0
+                        </td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace;" class="total-ung-luong">
+                            0
+                        </td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace;" class="total-sua-xe">
+                            0
+                        </td>
+                        <td style="text-align: right; font-family: 'Courier New', monospace; font-weight: bold; color: #1976d2;" class="total-con-lai">
+                            0
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <h3 style="margin-top: 0; margin-bottom: 20px;">
+            {% set month_parts = month.split('-') %}
+            {% if month_parts|length == 2 %}
+                📊 Bảng lương Tháng {{ month_parts[1] }}/{{ month_parts[0] }}
+            {% else %}
+                📊 Bảng lương Tháng {{ month }}
+            {% endif %}
+        </h3>
+        <div style="text-align: center; padding: 60px 20px; color: #666;">
+            <i class="fas fa-inbox" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+            {% set month_parts = month.split('-') %}
+            {% set year = month_parts[0] %}
+            {% set month_num = month_parts[1] %}
+            <p style="font-size: 16px; margin: 0;">Không có dữ liệu cho tháng {{ month_num }}/{{ year }}</p>
+            <p style="font-size: 14px; color: #999; margin-top: 8px;">Vui lòng chọn tháng khác hoặc kiểm tra dữ liệu chấm công</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+/* Đảm bảo layout không bị chồng */
+.page-wrapper {
+    position: relative !important;
+    clear: both !important;
+    min-height: auto !important;
+    overflow: visible !important;
+}
+
+.page-wrapper .card {
+    position: relative !important;
+    clear: both !important;
+    margin-bottom: 20px !important;
+}
+
+.page-wrapper .card:last-child {
+    margin-bottom: 0 !important;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.data-table thead {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.data-table thead th {
+    padding: 12px 8px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.data-table tbody tr {
+    border-bottom: 1px solid #e1e8ed;
+    transition: background-color 0.2s;
+}
+
+.data-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.data-table tbody td {
+    padding: 10px 8px;
+    vertical-align: middle;
+}
+
+.salary-input {
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.salary-input:focus {
+    outline: none;
+    border-color: #42a5f5 !important;
+    box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.2);
+}
+
+.salary-input:hover {
+    border-color: #bbb;
+}
+
+@media (max-width: 1200px) {
+    .data-table {
+        font-size: 12px;
+    }
+    
+    .data-table thead th,
+    .data-table tbody td {
+        padding: 8px 6px;
+    }
+}
+</style>
+
+<script>
+// Đảm bảo layout được reset đúng khi trang load
+(function() {
+    // Scroll về đầu trang khi load (đặc biệt quan trọng trong iframe)
+    if (window.parent !== window) {
+        // Đang trong iframe
+        window.scrollTo(0, 0);
+        // Đảm bảo body và html có height auto
+        document.documentElement.style.height = 'auto';
+        document.body.style.height = 'auto';
+        document.body.style.overflow = 'visible';
+    }
+    
+    // Clear any potential duplicate content
+    const pageWrapper = document.querySelector('.page-wrapper');
+    if (pageWrapper) {
+        pageWrapper.style.position = 'relative';
+        pageWrapper.style.clear = 'both';
+        pageWrapper.style.minHeight = 'auto';
+    }
+})();
+
+// Xử lý form submit để đảm bảo giữ lại embed parameter
+document.addEventListener('DOMContentLoaded', function() {
+    const filterForm = document.getElementById('filterForm');
+    if (filterForm) {
+        // Kiểm tra nếu đang trong iframe và chưa có embed parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        if (!urlParams.has('embed') && window.parent !== window) {
+            // Đang trong iframe nhưng thiếu embed parameter
+            // Thêm hidden input nếu chưa có
+            if (!filterForm.querySelector('input[name="embed"]')) {
+                const embedInput = document.createElement('input');
+                embedInput.type = 'hidden';
+                embedInput.name = 'embed';
+                embedInput.value = '1';
+                filterForm.insertBefore(embedInput, filterForm.firstChild);
+            }
+        }
+        
+        // Xử lý submit để scroll về đầu trang
+        filterForm.addEventListener('submit', function() {
+            // Scroll về đầu trang trước khi submit
+            window.scrollTo(0, 0);
+            // Đảm bảo không có layout overlap
+            const resultsCard = document.querySelector('.card:last-of-type');
+            if (resultsCard) {
+                resultsCard.style.position = 'relative';
+                resultsCard.style.clear = 'both';
+            }
+        });
+    }
+});
+
+// Hàm parse số từ text đã format (loại bỏ dấu chấm và khoảng trắng)
+function parseFormattedNumber(text) {
+    if (!text || text.trim() === '') return 0;
+    // Loại bỏ tất cả dấu chấm, khoảng trắng và ký tự không phải số
+    const cleaned = text.toString().replace(/\./g, '').replace(/\s/g, '').replace(/[^\d]/g, '');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? 0 : num;
+}
+
+// Hàm format số thành tiền VNĐ (thêm dấu chấm phân cách hàng nghìn)
+function formatVND(number) {
+    if (isNaN(number) || number === null || number === undefined) return '0';
+    const num = Math.round(parseFloat(number));
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+// Tính "Còn lại" cho một dòng
+function calculateConLai(row) {
+    const tripSalary = parseFloat(row.getAttribute('data-trip-salary')) || 0;
+    
+    // Parse giá trị từ input (đã format)
+    const baoHiemXHInput = row.querySelector('input[data-field="bao_hiem_xh"]');
+    const ruaXeInput = row.querySelector('input[data-field="rua_xe"]');
+    const tienTrachNhiemInput = row.querySelector('input[data-field="tien_trach_nhiem"]');
+    const ungLuongInput = row.querySelector('input[data-field="ung_luong"]');
+    const suaXeInput = row.querySelector('input[data-field="sua_xe"]');
+    
+    const baoHiemXH = parseFormattedNumber(baoHiemXHInput ? baoHiemXHInput.value : '0');
+    const ruaXe = parseFormattedNumber(ruaXeInput ? ruaXeInput.value : '0');
+    const tienTrachNhiem = parseFormattedNumber(tienTrachNhiemInput ? tienTrachNhiemInput.value : '0');
+    const ungLuong = parseFormattedNumber(ungLuongInput ? ungLuongInput.value : '0');
+    const suaXe = parseFormattedNumber(suaXeInput ? suaXeInput.value : '0');
+    
+    // Lưu giá trị thực vào data attribute
+    if (baoHiemXHInput) baoHiemXHInput.setAttribute('data-value', baoHiemXH);
+    if (ruaXeInput) ruaXeInput.setAttribute('data-value', ruaXe);
+    if (tienTrachNhiemInput) tienTrachNhiemInput.setAttribute('data-value', tienTrachNhiem);
+    if (ungLuongInput) ungLuongInput.setAttribute('data-value', ungLuong);
+    if (suaXeInput) suaXeInput.setAttribute('data-value', suaXe);
+    
+    // Công thức: Còn lại = Lương chuyến - Bảo hiểm XH - Tiền trách nhiệm - Ứng lương + Rửa xe + Sửa xe
+    const conLai = tripSalary - baoHiemXH - tienTrachNhiem - ungLuong + ruaXe + suaXe;
+    
+    // Cập nhật giá trị hiển thị
+    const conLaiCell = row.querySelector('.con-lai-value');
+    if (conLaiCell) {
+        conLaiCell.textContent = formatVND(conLai);
+    }
+    
+    return {
+        baoHiemXH,
+        ruaXe,
+        tienTrachNhiem,
+        ungLuong,
+        suaXe,
+        conLai
+    };
+}
+
+// Cập nhật tổng cộng
+function updateTotals() {
+    const rows = document.querySelectorAll('#salaryTable tbody tr:not(#totalRow)');
+    let totalBaoHiemXH = 0;
+    let totalRuaXe = 0;
+    let totalTienTrachNhiem = 0;
+    let totalUngLuong = 0;
+    let totalSuaXe = 0;
+    let totalConLai = 0;
+    
+    rows.forEach(row => {
+        const values = calculateConLai(row);
+        totalBaoHiemXH += values.baoHiemXH;
+        totalRuaXe += values.ruaXe;
+        totalTienTrachNhiem += values.tienTrachNhiem;
+        totalUngLuong += values.ungLuong;
+        totalSuaXe += values.suaXe;
+        totalConLai += values.conLai;
+    });
+    
+    // Cập nhật tổng cộng
+    const totalRow = document.getElementById('totalRow');
+    if (totalRow) {
+        totalRow.querySelector('.total-bao-hiem-xh').textContent = formatVND(totalBaoHiemXH);
+        totalRow.querySelector('.total-rua-xe').textContent = formatVND(totalRuaXe);
+        totalRow.querySelector('.total-tien-trach-nhiem').textContent = formatVND(totalTienTrachNhiem);
+        totalRow.querySelector('.total-ung-luong').textContent = formatVND(totalUngLuong);
+        totalRow.querySelector('.total-sua-xe').textContent = formatVND(totalSuaXe);
+        totalRow.querySelector('.total-con-lai').textContent = formatVND(totalConLai);
+    }
+}
+
+// Xử lý sự kiện khi user thay đổi input
+document.addEventListener('DOMContentLoaded', function() {
+    const salaryInputs = document.querySelectorAll('.salary-input');
+    
+    // Khởi tạo giá trị format cho tất cả input
+    salaryInputs.forEach(input => {
+        const initialValue = parseFloat(input.getAttribute('data-value')) || 0;
+        input.value = formatVND(initialValue);
+        input.setAttribute('data-value', initialValue);
+    });
+    
+    salaryInputs.forEach(input => {
+        // Xử lý khi user nhập (realtime formatting)
+        input.addEventListener('input', function(e) {
+            const cursorPosition = this.selectionStart;
+            const oldValue = this.value;
+            
+            // Parse giá trị hiện tại
+            const numericValue = parseFormattedNumber(this.value);
+            
+            // Đảm bảo không cho nhập số âm
+            const safeValue = Math.max(0, numericValue);
+            
+            // Format lại giá trị
+            const formattedValue = formatVND(safeValue);
+            this.value = formattedValue;
+            
+            // Lưu giá trị thực vào data attribute
+            this.setAttribute('data-value', safeValue);
+            
+            // Khôi phục vị trí cursor (tính toán lại vì đã thêm dấu chấm)
+            const newLength = formattedValue.length;
+            const oldLength = oldValue.length;
+            const diff = newLength - oldLength;
+            let newCursorPos = cursorPosition + diff;
+            
+            // Đảm bảo cursor không vượt quá độ dài
+            if (newCursorPos < 0) newCursorPos = 0;
+            if (newCursorPos > newLength) newCursorPos = newLength;
+            
+            // Set cursor position (sử dụng setTimeout để đảm bảo DOM đã update)
+            setTimeout(() => {
+                this.setSelectionRange(newCursorPos, newCursorPos);
+            }, 0);
+            
+            // Tìm dòng chứa input này và tính toán
+            const row = this.closest('tr');
+            if (row) {
+                calculateConLai(row);
+                updateTotals();
+            }
+        });
+        
+        // Xử lý khi user blur (rời khỏi ô) - đảm bảo format đúng
+        input.addEventListener('blur', function() {
+            const numericValue = parseFormattedNumber(this.value);
+            const safeValue = Math.max(0, numericValue);
+            this.value = formatVND(safeValue);
+            this.setAttribute('data-value', safeValue);
+        });
+        
+        // Xử lý khi user focus - cho phép xóa và nhập lại dễ dàng
+        input.addEventListener('focus', function() {
+            // Có thể giữ nguyên format hoặc xóa format khi focus
+            // Ở đây giữ nguyên để user thấy rõ giá trị
+        });
+    });
+    
+    // Tính tổng ban đầu
+    updateTotals();
+});
+
+// Hàm lưu dữ liệu lương
+function saveSalaryData() {
+    const month = document.getElementById('month').value;
+    if (!month) {
+        alert('Vui lòng chọn tháng trước khi lưu');
+        return;
+    }
+    
+    // Thu thập dữ liệu từ bảng
+    const rows = document.querySelectorAll('#salaryTable tbody tr:not(#totalRow)');
+    const salaryData = [];
+    
+    rows.forEach((row) => {
+        const user_id = parseInt(row.getAttribute('data-user-id')) || 0;
+        if (!user_id) return; // Skip nếu không có user_id
+        
+        // Parse từ data-value hoặc từ value đã format
+        const baoHiemXHInput = row.querySelector('input[data-field="bao_hiem_xh"]');
+        const ruaXeInput = row.querySelector('input[data-field="rua_xe"]');
+        const tienTrachNhiemInput = row.querySelector('input[data-field="tien_trach_nhiem"]');
+        const ungLuongInput = row.querySelector('input[data-field="ung_luong"]');
+        const suaXeInput = row.querySelector('input[data-field="sua_xe"]');
+        
+        const baoHiemXH = baoHiemXHInput ? (parseFloat(baoHiemXHInput.getAttribute('data-value')) || parseFormattedNumber(baoHiemXHInput.value)) : 0;
+        const ruaXe = ruaXeInput ? (parseFloat(ruaXeInput.getAttribute('data-value')) || parseFormattedNumber(ruaXeInput.value)) : 0;
+        const tienTrachNhiem = tienTrachNhiemInput ? (parseFloat(tienTrachNhiemInput.getAttribute('data-value')) || parseFormattedNumber(tienTrachNhiemInput.value)) : 0;
+        const ungLuong = ungLuongInput ? (parseFloat(ungLuongInput.getAttribute('data-value')) || parseFormattedNumber(ungLuongInput.value)) : 0;
+        const suaXe = suaXeInput ? (parseFloat(suaXeInput.getAttribute('data-value')) || parseFormattedNumber(suaXeInput.value)) : 0;
+        
+        salaryData.push({
+            user_id: user_id,
+            bao_hiem_xh: Math.round(baoHiemXH),
+            rua_xe: Math.round(ruaXe),
+            tien_trach_nhiem: Math.round(tienTrachNhiem),
+            ung_luong: Math.round(ungLuong),
+            sua_xe: Math.round(suaXe)
+        });
+    });
+    
+    // Disable button và hiển thị loading
+    const saveBtn = document.getElementById('saveBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang lưu...';
+    
+    // Gửi dữ liệu đến endpoint save
+    fetch('/api/salary-summary/save', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            month: month,
+            salary_data: salaryData
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'Đã lưu thành công!');
+            // Reload trang để hiển thị dữ liệu đã lưu
+            window.location.reload();
+        } else {
+            alert('Lỗi: ' + (data.message || 'Không thể lưu dữ liệu'));
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalText;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Có lỗi xảy ra khi lưu: ' + error.message);
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+    });
+}
+
+// Hàm xuất Excel
+function exportToExcel() {
+    const month = document.getElementById('month').value;
+    if (!month) {
+        alert('Vui lòng chọn tháng trước khi xuất Excel');
+        return;
+    }
+    
+    // Thu thập dữ liệu từ bảng
+    const rows = document.querySelectorAll('#salaryTable tbody tr:not(#totalRow)');
+    const salaryData = [];
+    
+    rows.forEach((row, index) => {
+        const fullName = row.querySelector('td:nth-child(2) strong').textContent.trim();
+        const workingDays = parseInt(row.querySelector('td:nth-child(3)').textContent.trim()) || 0;
+        const totalTrips = parseInt(row.querySelector('td:nth-child(4)').textContent.trim()) || 0;
+        const tripSalary = parseFloat(row.getAttribute('data-trip-salary')) || 0;
+        
+        // Parse từ data-value hoặc từ value đã format
+        const baoHiemXHInput = row.querySelector('input[data-field="bao_hiem_xh"]');
+        const ruaXeInput = row.querySelector('input[data-field="rua_xe"]');
+        const tienTrachNhiemInput = row.querySelector('input[data-field="tien_trach_nhiem"]');
+        const ungLuongInput = row.querySelector('input[data-field="ung_luong"]');
+        const suaXeInput = row.querySelector('input[data-field="sua_xe"]');
+        
+        const baoHiemXH = baoHiemXHInput ? (parseFloat(baoHiemXHInput.getAttribute('data-value')) || parseFormattedNumber(baoHiemXHInput.value)) : 0;
+        const ruaXe = ruaXeInput ? (parseFloat(ruaXeInput.getAttribute('data-value')) || parseFormattedNumber(ruaXeInput.value)) : 0;
+        const tienTrachNhiem = tienTrachNhiemInput ? (parseFloat(tienTrachNhiemInput.getAttribute('data-value')) || parseFormattedNumber(tienTrachNhiemInput.value)) : 0;
+        const ungLuong = ungLuongInput ? (parseFloat(ungLuongInput.getAttribute('data-value')) || parseFormattedNumber(ungLuongInput.value)) : 0;
+        const suaXe = suaXeInput ? (parseFloat(suaXeInput.getAttribute('data-value')) || parseFormattedNumber(suaXeInput.value)) : 0;
+        
+        // Parse conLai từ text (đã format)
+        const conLaiText = row.querySelector('.con-lai-value') ? row.querySelector('.con-lai-value').textContent.trim() : '0';
+        const conLai = parseFormattedNumber(conLaiText);
+        
+        salaryData.push({
+            full_name: fullName,
+            working_days: workingDays,
+            total_trips: totalTrips,
+            trip_salary: tripSalary,
+            bao_hiem_xh: baoHiemXH,
+            rua_xe: ruaXe,
+            tien_trach_nhiem: tienTrachNhiem,
+            ung_luong: ungLuong,
+            sua_xe: suaXe,
+            con_lai: conLai
+        });
+    });
+    
+    // Gửi dữ liệu đến endpoint export
+    fetch('/api/salary-summary/export-excel', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            month: month,
+            salary_data: salaryData
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Lỗi khi xuất Excel');
+        }
+        return response.blob();
+    })
+    .then(blob => {
+        // Tạo URL tạm và download file
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Bang_Luong_Tong_${month}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Có lỗi xảy ra khi xuất Excel: ' + error.message);
+    });
+}
+</script>
+{% endblock %}
+

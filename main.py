@@ -3,8 +3,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, Date, DateTime, ForeignKey, and_, or_, extract, func
-from sqlalchemy.ext.declarative import declarative_base
+from starlette.middleware.base import BaseHTTPMiddleware
+from sqlalchemy import create_engine, Column, Integer, String, Float, Date, DateTime, ForeignKey, and_, or_, extract, func, UniqueConstraint
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, date, timedelta
 import os
@@ -103,23 +104,38 @@ def to_local_time(utc_datetime):
         except:
             return str(utc_datetime)
 
+# Mapping từ page_path sang permission_code
+PAGE_PERMISSION_MAP = {
+    "/": "home.view",
+    "/operations": "operations.view",
+    "/employees": "employee.view",
+    "/vehicles": "vehicle.view",
+    "/routes": "route.view",
+    "/timekeeping-v1": "timekeeping.view",
+    "/maintenance": "maintenance.view",
+    "/theo-doi-dau-v2": "fuel.view",
+    "/salary-calculation-v2": "salary.view",
+    "/finance-report": "finance.report.view",
+    "/financial-statistics": "finance.statistics.view",
+    "/administrative": "administrative.view",
+    "/accounts": "account.view",  # Account list (admin only)
+    "/revenue": "revenue.view",
+    "/daily-new": "daily.view",
+}
+
+def get_permission_code_for_page(page_path: str) -> Optional[str]:
+    """Lấy permission code tương ứng với page_path"""
+    return PAGE_PERMISSION_MAP.get(page_path)
+
 # Helper function để kiểm tra quyền trong template
-def has_page_access(role: str, page_path: str, user_id: Optional[int] = None) -> bool:
-    """Helper function để kiểm tra quyền trong template (không có db, chỉ dùng cho menu)"""
-    # Admin có quyền truy cập tất cả
-    if role == "Admin":
-        return True
-    
-    # Fallback về logic cũ cho menu (không có db trong template context)
-    if role == "Manager":
-        restricted_pages = ["/accounts"]
-        return page_path not in restricted_pages
-    
-    if role == "User":
-        allowed_pages = ["/daily-new", "/revenue", "/financial-statistics", "/timekeeping-v1", "/salary-calculation-v2", "/login", "/logout", "/maintenance", "/theo-doi-dau-v2"]
-        return page_path in allowed_pages
-    
-    return False
+def has_page_access(role: str, page_path: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> bool:
+    """Open access: luôn cho phép hiển thị menu/route."""
+    return True
+
+# Helper function để lấy ngày hiện tại cho templates
+def get_today():
+    """Trả về ngày hiện tại để sử dụng trong templates"""
+    return date.today()
 
 # Đăng ký filters và global functions
 templates.env.filters["from_json"] = from_json
@@ -127,6 +143,7 @@ templates.env.filters["tojson"] = tojson
 templates.env.filters["safe_getattr"] = safe_getattr
 templates.env.filters["to_local_time"] = to_local_time
 templates.env.globals["has_page_access"] = has_page_access
+templates.env.globals["today"] = get_today
 
 # Models
 class Employee(Base):
@@ -356,12 +373,14 @@ class Account(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, nullable=False)  # Tên đăng nhập
-    password = Column(String, nullable=False)  # Mật khẩu (lưu dạng plain text, có thể hash sau)
+    password_hash = Column(String, nullable=True)  # Mật khẩu đã hash (nullable để backward compatibility)
+    password = Column(String, nullable=True)  # Mật khẩu plain text (legacy, kept for backward compatibility)
     full_name = Column(String)  # Họ tên
     email = Column(String)  # Email
     phone = Column(String)  # Số điện thoại
-    role = Column(String, default="User")  # Phân quyền: Admin, Manager, User
+    role = Column(String, default="User")  # Phân quyền: Admin, Manager, User (legacy field, kept for backward compatibility)
     status = Column(String, default="Active")  # Trạng thái: Active, Inactive
+    is_active = Column(Integer, default=1)  # 1: Active, 0: Inactive (chuẩn RBAC)
     is_locked = Column(Integer, default=0)  # 0: Mở, 1: Khoá
     locked_at = Column(DateTime, nullable=True)  # Thời điểm khoá
     locked_by = Column(Integer, ForeignKey("accounts.id"), nullable=True)  # Ai khoá
@@ -371,42 +390,122 @@ class Account(Base):
     
     # Relationships
     locker = relationship("Account", remote_side=[id], foreign_keys=[locked_by])
+    user_roles = relationship("UserRole", primaryjoin="Account.id == UserRole.user_id", back_populates="user", cascade="all, delete-orphan")
+    user_permissions = relationship("UserPermission", back_populates="user", cascade="all, delete-orphan")
+
+class Role(Base):
+    """Bảng quản lý vai trò"""
+    __tablename__ = "roles"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, nullable=True)  # Mã vai trò: ADMIN, MANAGER, USER (nullable để backward compatibility)
+    name = Column(String, unique=True, nullable=False)  # Tên vai trò: Super Admin, Admin Operations, etc.
+    description = Column(String)  # Mô tả vai trò
+    is_system_role = Column(Integer, default=0)  # 1: System role (cannot delete), 0: Custom role
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user_roles = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+    role_permissions = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
+
+class UserRole(Base):
+    """Bảng mapping vai trò cho user (many-to-many)"""
+    __tablename__ = "user_roles"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+    assigned_by = Column(Integer, ForeignKey("accounts.id"), nullable=True)  # Who assigned this role
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("Account", foreign_keys=[user_id], back_populates="user_roles")
+    role = relationship("Role", back_populates="user_roles")
+    assigner = relationship("Account", foreign_keys=[assigned_by])
 
 class Permission(Base):
     """Bảng quản lý quyền truy cập"""
     __tablename__ = "permissions"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)  # Tên quyền (VD: employees.view, employees.create)
+    code = Column(String, unique=True, nullable=True)  # Mã quyền: user.view, user.edit, role.manage (primary identifier) - nullable để backward compatibility
+    name = Column(String, unique=True, nullable=False)  # Tên quyền (VD: employees.view, employees.create) - kept for backward compatibility
     description = Column(String)  # Mô tả quyền
-    page_path = Column(String)  # Đường dẫn page (VD: /employees)
-    action = Column(String)  # Hành động: view, create, edit, delete
+    page_path = Column(String)  # Đường dẫn page (VD: /employees) - kept for backward compatibility
+    action = Column(String)  # Hành động: view, create, update, delete - kept for backward compatibility
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    role_permissions = relationship("RolePermission", back_populates="permission", cascade="all, delete-orphan")
+    user_permissions = relationship("UserPermission", back_populates="permission", cascade="all, delete-orphan")
 
 class RolePermission(Base):
     """Bảng mapping quyền cho vai trò"""
     __tablename__ = "role_permissions"
     
     id = Column(Integer, primary_key=True, index=True)
-    role = Column(String, nullable=False)  # Vai trò: Admin, Manager, User
-    permission_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)  # Changed from role String to role_id FK
+    permission_id = Column(Integer, ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
-    permission = relationship("Permission")
+    role = relationship("Role", back_populates="role_permissions")
+    permission = relationship("Permission", back_populates="role_permissions")
 
 class UserPermission(Base):
-    """Bảng mapping quyền cho từng user cụ thể"""
+    """Bảng mapping quyền cho từng user cụ thể (override role permissions)"""
     __tablename__ = "user_permissions"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
-    permission_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
+    permission_id = Column(Integer, ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
-    user = relationship("Account", foreign_keys=[user_id])
-    permission = relationship("Permission")
+    user = relationship("Account", foreign_keys=[user_id], back_populates="user_permissions")
+    permission = relationship("Permission", back_populates="user_permissions")
+
+class Document(Base):
+    """Bảng quản lý tài liệu hành chính (Legal, Administrative/HR, Tax)"""
+    __tablename__ = "documents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Category: legal, administrative, tax
+    category = Column(String, nullable=False)  # legal, administrative, tax
+    
+    # Document type
+    document_type = Column(String, nullable=False)  # e.g., 'contract', 'license', 'tax_return'
+    
+    # Related entity (polymorphic)
+    related_entity_type = Column(String, nullable=True)  # e.g., 'vehicle', 'employee', 'company'
+    related_entity_id = Column(Integer, nullable=True)  # ID of related entity
+    
+    # Document details
+    title = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)  # Relative path to file
+    
+    # Dates
+    issued_date = Column(Date, nullable=True)
+    expiry_date = Column(Date, nullable=True)  # Nullable
+    
+    # Status
+    status = Column(String, default="active")  # active, expired, archived
+    
+    # Metadata
+    description = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+    
+    # Audit fields
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    
+    # Relationships
+    creator = relationship("Account", foreign_keys=[created_by])
+    updater = relationship("Account", foreign_keys=[updated_by])
 
 class AuditLog(Base):
     """Bảng nhật ký hệ thống - ghi lại mọi thay đổi"""
@@ -479,6 +578,31 @@ class RoutePrice(Base):
     # Relationships
     route = relationship("Route")
 
+class SalaryMonthly(Base):
+    """Bảng lưu snapshot lương tháng cho từng lái xe"""
+    __tablename__ = "salary_monthly"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)  # ID nhân viên/lái xe
+    month = Column(Integer, nullable=False)  # Tháng (1-12)
+    year = Column(Integer, nullable=False)  # Năm
+    # Các trường manual
+    bao_hiem_xh = Column(Integer, default=0)  # Bảo hiểm XH (VNĐ)
+    rua_xe = Column(Integer, default=0)  # Rửa xe (VNĐ)
+    tien_trach_nhiem = Column(Integer, default=0)  # Tiền trách nhiệm (VNĐ)
+    ung_luong = Column(Integer, default=0)  # Ứng lương (VNĐ)
+    sua_xe = Column(Integer, default=0)  # Sửa xe (VNĐ)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    employee = relationship("Employee")
+    
+    # Unique constraint: một nhân viên chỉ có một bản ghi cho mỗi tháng/năm
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'month', 'year', name='uq_salary_monthly_employee_month_year'),
+    )
+
 
 # Tạo bảng
 Base.metadata.create_all(bind=engine)
@@ -533,6 +657,19 @@ def migrate_accounts():
             if 'last_login' not in existing_columns:
                 conn.execute(text("ALTER TABLE accounts ADD COLUMN last_login DATETIME"))
                 print("Added column last_login to accounts table")
+            
+            # RBAC refactor: Thêm password_hash và is_active
+            if 'password_hash' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN password_hash VARCHAR"))
+                # Copy password sang password_hash cho các accounts hiện có
+                conn.execute(text("UPDATE accounts SET password_hash = password WHERE password_hash IS NULL"))
+                print("Added column password_hash to accounts table")
+            
+            if 'is_active' not in existing_columns:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN is_active INTEGER DEFAULT 1"))
+                # Set is_active = 1 cho các accounts hiện có
+                conn.execute(text("UPDATE accounts SET is_active = 1 WHERE is_active IS NULL"))
+                print("Added column is_active to accounts table")
             
             conn.commit()
             
@@ -669,6 +806,63 @@ def get_fuel_price_by_date(db: Session, target_date: date) -> Optional[DieselPri
     return fuel_price
 
 # Helper function để lấy định mức nhiên liệu của xe
+def is_route_off_on_date(db: Session, route_code: str, date: date, license_plate: str) -> bool:
+    """
+    Kiểm tra xem tuyến có bị OFF trong ngày đó không.
+    
+    Logic:
+    - Tìm DailyRoute với cùng date, license_plate, và route_code
+    - Nếu tất cả DailyRoute của route đó trong ngày đều có status = OFF → return True
+    - Nếu có ít nhất 1 DailyRoute có status = ONLINE/ON → return False
+    - Nếu không tìm thấy DailyRoute → return False (không có dữ liệu chấm công hàng ngày)
+    
+    Args:
+        db: Database session
+        route_code: Mã tuyến (route_code)
+        date: Ngày cần kiểm tra
+        license_plate: Biển số xe
+    
+    Returns:
+        True nếu route bị OFF trong ngày đó, False nếu không
+    """
+    try:
+        # Tìm Route theo route_code
+        route = db.query(Route).filter(
+            Route.route_code == route_code.strip(),
+            Route.status == 1,
+            Route.is_active == 1
+        ).first()
+        
+        if not route:
+            # Không tìm thấy route → không có dữ liệu → không OFF
+            return False
+        
+        # Tìm DailyRoute với cùng route_id, date, và license_plate
+        daily_routes = db.query(DailyRoute).filter(
+            DailyRoute.route_id == route.id,
+            DailyRoute.date == date,
+            DailyRoute.license_plate == license_plate.strip()
+        ).all()
+        
+        if not daily_routes:
+            # Không có DailyRoute → không có dữ liệu chấm công hàng ngày → không OFF
+            return False
+        
+        # Kiểm tra: nếu TẤT CẢ DailyRoute đều OFF → route bị OFF
+        all_off = True
+        for dr in daily_routes:
+            dr_status = (dr.status or "").strip().upper()
+            if dr_status in ["ONLINE", "ON"]:
+                all_off = False
+                break
+        
+        return all_off
+    
+    except Exception as e:
+        print(f"Error checking route status for {route_code} on {date}: {e}")
+        # Nếu có lỗi, mặc định là không OFF để tránh bỏ sót dữ liệu
+        return False
+
 def get_vehicle_fuel_consumption(db: Session, license_plate: str) -> Optional[float]:
     """
     Lấy định mức nhiên liệu (lít/100km) của xe theo biển số.
@@ -815,6 +1009,13 @@ def calculate_fuel_quota(result: TimekeepingDetail, db: Session) -> dict:
     if not trip_date or not license_plate or distance_km <= 0:
         return result_dict
     
+    # 🔍 KIỂM TRA ROUTE STATUS: Nếu route bị OFF trong ngày đó → KHÔNG tính dầu
+    route_code_to_check = result.route_code or result.route_name or ""
+    if route_code_to_check:
+        if is_route_off_on_date(db, route_code_to_check, trip_date, license_plate.strip()):
+            result_dict["warning"] = "Tuyến bị OFF trong ngày này"
+            return result_dict
+    
     # 🔍 BƯỚC 1: Kiểm tra điều kiện khoán xe (BẮT BUỘC)
     is_valid_assignment, assignment_reason = check_vehicle_assignment_for_trip(
         db, license_plate, driver_name, trip_date
@@ -912,6 +1113,108 @@ try:
 except Exception as e:
     print(f"Migration error for vehicle_maintenance_items (may be expected if table doesn't exist yet): {e}")
 
+# Migration: Thêm code field vào roles và permissions (RBAC refactor)
+# Trả về True nếu migration thành công, False nếu thất bại
+def migrate_rbac_code_fields():
+    """Thêm code field vào roles và permissions table"""
+    from sqlalchemy import inspect, text
+    
+    migration_success = True
+    
+    try:
+        inspector = inspect(engine)
+        
+        # Migrate roles table
+        if 'roles' in inspector.get_table_names():
+            existing_columns = [col['name'] for col in inspector.get_columns('roles')]
+            
+            if 'code' not in existing_columns:
+                with engine.connect() as conn:
+                    trans = conn.begin()
+                    try:
+                        # Step 1: Add column WITHOUT UNIQUE constraint (SQLite không hỗ trợ)
+                        conn.execute(text("ALTER TABLE roles ADD COLUMN code VARCHAR"))
+                        
+                        # Step 2: Update existing roles với code
+                        conn.execute(text("UPDATE roles SET code = 'ADMIN' WHERE name = 'Super Admin' OR name = 'Admin'"))
+                        conn.execute(text("UPDATE roles SET code = 'MANAGER' WHERE name = 'Admin Operations'"))
+                        conn.execute(text("UPDATE roles SET code = 'USER' WHERE name = 'Viewer' OR name = 'User'"))
+                        
+                        trans.commit()
+                        print("Added column code to roles table")
+                        
+                        # Step 3: Create UNIQUE INDEX sau khi đã có dữ liệu (ngoài transaction)
+                        # Kiểm tra xem index đã tồn tại chưa
+                        indexes = inspector.get_indexes('roles')
+                        index_names = [idx['name'] for idx in indexes]
+                        if 'idx_roles_code_unique' not in index_names:
+                            with engine.connect() as conn2:
+                                conn2.execute(text("CREATE UNIQUE INDEX idx_roles_code_unique ON roles(code)"))
+                                conn2.commit()
+                                print("Created UNIQUE INDEX on roles.code")
+                    except Exception as e:
+                        trans.rollback()
+                        print(f"Error adding code to roles: {e}")
+                        migration_success = False
+        
+        # Migrate permissions table
+        if 'permissions' in inspector.get_table_names():
+            existing_columns = [col['name'] for col in inspector.get_columns('permissions')]
+            
+            if 'code' not in existing_columns:
+                with engine.connect() as conn:
+                    trans = conn.begin()
+                    try:
+                        # Step 1: Add column WITHOUT UNIQUE constraint (SQLite không hỗ trợ)
+                        conn.execute(text("ALTER TABLE permissions ADD COLUMN code VARCHAR"))
+                        
+                        # Step 2: Update existing permissions với code (map từ page_path + action)
+                        conn.execute(text("UPDATE permissions SET code = 'user.view' WHERE page_path = '/user-management' AND action = 'view' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'user.create' WHERE page_path = '/user-management' AND action = 'create' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'user.edit' WHERE page_path = '/user-management' AND action = 'update' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'user.delete' WHERE page_path = '/user-management' AND action = 'delete' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'role.view' WHERE page_path = '/role-management' AND action = 'view' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'role.create' WHERE page_path = '/role-management' AND action = 'create' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'role.edit' WHERE page_path = '/role-management' AND action = 'update' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'role.delete' WHERE page_path = '/role-management' AND action = 'delete' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'account.view' WHERE page_path = '/accounts' AND action = 'view' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'account.edit' WHERE page_path = '/accounts' AND action = 'update' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'administrative.view' WHERE page_path = '/administrative' AND action = 'view' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'administrative.create' WHERE page_path = '/administrative' AND action = 'create' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'administrative.update' WHERE page_path = '/administrative' AND action = 'update' AND code IS NULL"))
+                        conn.execute(text("UPDATE permissions SET code = 'administrative.delete' WHERE page_path = '/administrative' AND action = 'delete' AND code IS NULL"))
+                        
+                        trans.commit()
+                        print("Added column code to permissions table")
+                        
+                        # Step 3: Create UNIQUE INDEX sau khi đã có dữ liệu (ngoài transaction)
+                        # Kiểm tra xem index đã tồn tại chưa
+                        indexes = inspector.get_indexes('permissions')
+                        index_names = [idx['name'] for idx in indexes]
+                        if 'idx_permissions_code_unique' not in index_names:
+                            with engine.connect() as conn2:
+                                conn2.execute(text("CREATE UNIQUE INDEX idx_permissions_code_unique ON permissions(code)"))
+                                conn2.commit()
+                                print("Created UNIQUE INDEX on permissions.code")
+                    except Exception as e:
+                        trans.rollback()
+                        print(f"Error adding code to permissions: {e}")
+                        migration_success = False
+        
+    except Exception as e:
+        print(f"Migration error for RBAC code fields: {e}")
+        migration_success = False
+    
+    return migration_success
+
+# Chạy migration và lưu kết quả
+rbac_migration_success = False
+try:
+    rbac_migration_success = migrate_rbac_code_fields()
+except Exception as e:
+    print(f"Migration error for RBAC code fields (may be expected): {e}")
+    rbac_migration_success = False
+
 # Migration: Thêm các cột mới vào bảng vehicle_assignments nếu chưa có
 def migrate_vehicle_assignments():
     """Thêm các cột transfer_reason và internal_note vào bảng vehicle_assignments nếu chưa có"""
@@ -988,9 +1291,12 @@ def get_db():
     finally:
         db.close()
 
-# Dependency để kiểm tra authentication
-def get_current_user(request: Request, db: Session = Depends(get_db)):
-    """Lấy thông tin user hiện tại từ session"""
+def get_current_user(request: Request):
+    """
+    Dependency to get current logged-in user from session.
+    Returns user info if logged in, None otherwise.
+    Note: AuthMiddleware handles redirects, this just returns user info.
+    """
     user_id = request.session.get("user_id")
     username = request.session.get("username")
     role = request.session.get("role")
@@ -998,85 +1304,138 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     if not user_id or not username:
         return None
     
-    # Verify user vẫn tồn tại trong database
-    account = db.query(Account).filter(Account.id == user_id, Account.username == username).first()
-    if not account:
-        # Clear session nếu user không tồn tại
-        request.session.clear()
-        return None
-    
     return {
-        "id": account.id,
-        "username": account.username,
-        "role": account.role
+        "id": user_id,
+        "username": username,
+        "role": role or "User"
     }
 
-# Dependency để kiểm tra user đã đăng nhập
-def require_auth(current_user = Depends(get_current_user)):
-    """Yêu cầu user phải đăng nhập"""
-    if current_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return current_user
-
-# Dependency để kiểm tra quyền Admin
-def require_admin(current_user = Depends(require_auth)):
-    """Yêu cầu user phải có quyền Admin"""
-    if current_user["role"] != "Admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
-    return current_user
-
-# Dependency để kiểm tra quyền User hoặc Admin
-def require_user_or_admin(current_user = Depends(require_auth)):
-    """Yêu cầu user phải có quyền User hoặc Admin"""
-    if current_user["role"] not in ["User", "Admin"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
-    return current_user
+# Compatibility stub: legacy endpoints still reference require_auth().
+# This function is deprecated - use get_current_user dependency instead.
+def require_auth():
+    # Return None as this is deprecated - routes should use get_current_user dependency
+    return None
 
 # Helper function để check user có quyền truy cập trang không
 def check_page_access(role: str, page_path: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> bool:
-    """Kiểm tra user có quyền truy cập trang không"""
-    # Admin có quyền truy cập tất cả
-    if role == "Admin":
-        return True
-    
-    # Nếu không có db hoặc user_id, fallback về logic cũ
-    if not db or not user_id:
-        # Manager có quyền truy cập hầu hết các trang (trừ accounts)
-        if role == "Manager":
-            restricted_pages = ["/accounts"]
-            return page_path not in restricted_pages
-        
-        # User chỉ được truy cập một số trang nhất định
-        if role == "User":
-            allowed_pages = ["/daily-new", "/revenue", "/financial-statistics", "/timekeeping-v1", "/salary-calculation-v2", "/login", "/logout", "/maintenance", "/theo-doi-dau-v2"]
-            return page_path in allowed_pages
-        
+    """Open access: luôn cho phép truy cập page."""
+    return True
+
+# Helper function để kiểm tra column có tồn tại không
+def column_exists(table_name: str, column_name: str) -> bool:
+    """Kiểm tra column có tồn tại trong table không"""
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        if table_name not in inspector.get_table_names():
+            return False
+        existing_columns = [col['name'] for col in inspector.get_columns(table_name)]
+        return column_name in existing_columns
+    except Exception:
         return False
+
+def check_permission(db: Session, user_id: Optional[int], permission_code: str, page_path: str = None, action: str = None) -> bool:
+    """Open access: luôn cho phép (RBAC disabled)."""
+    return True
+
+def has_permission(db: Session, user_id: int, permission_code: str) -> bool:
+    """
+    Helper function để kiểm tra permission theo code (alias cho check_permission)
+    Usage: has_permission(db, user_id, "user.view")
+    """
+    return check_permission(db, user_id, permission_code)
+
+ # NOTE: require_permission dependency removed (open access).
+
+def get_user_permissions(db: Session, user_id: int) -> dict:
+    """
+    Lấy tất cả permissions của user (từ roles + user-specific)
+    Returns dict với key là permission.code và value là True
+    """
+    # Get user's roles
+    user_roles = db.query(UserRole).filter(UserRole.user_id == user_id).all()
+    role_ids = [ur.role_id for ur in user_roles]
     
-    # Kiểm tra quyền từ database
-    # Tìm permission cho page_path này
-    permission = db.query(Permission).filter(Permission.page_path == page_path).first()
-    if not permission:
-        # Nếu không có permission được định nghĩa, cho phép truy cập (backward compatibility)
-        return True
+    # Kiểm tra column code có tồn tại không
+    permission_code_exists = column_exists('permissions', 'code')
+    role_code_exists = column_exists('roles', 'code')
     
-    # Kiểm tra xem user có quyền này không
-    user_permission = db.query(UserPermission).filter(
-        UserPermission.user_id == user_id,
-        UserPermission.permission_id == permission.id
-    ).first()
+    # Fallback to legacy role field if RBAC tables are empty (backward compatibility)
+    if not role_ids:
+        account = db.query(Account).filter(Account.id == user_id).first()
+        if account and account.role in ["Admin", "Super Admin"]:
+            # Return all permissions for legacy Admin/Super Admin
+            all_permissions = db.query(Permission).all()
+            result = {}
+            for p in all_permissions:
+                if permission_code_exists and p.code:
+                    result[p.code] = True
+                else:
+                    # Fallback to old format
+                    result[f"{p.page_path}:{p.action}"] = True
+            return result
+        return {}
     
-    if user_permission:
-        return True
+    # Check if Admin (by code or name)
+    admin_role = None
+    if role_code_exists:
+        admin_role = db.query(Role).filter(
+            or_(
+                Role.code == "ADMIN",
+                Role.name == "Admin",
+                Role.name == "Super Admin"
+            )
+        ).first()
+    else:
+        # Fallback nếu column code chưa tồn tại
+        admin_role = db.query(Role).filter(
+            or_(
+                Role.name == "Admin",
+                Role.name == "Super Admin"
+            )
+        ).first()
     
-    # Guest không có quyền truy cập
-    return False
+    if admin_role and admin_role.id in role_ids:
+        # Return all permissions for Admin
+        all_permissions = db.query(Permission).all()
+        result = {}
+        for p in all_permissions:
+            if permission_code_exists and p.code:
+                result[p.code] = True
+            else:
+                result[f"{p.page_path}:{p.action}"] = True
+        return result
+    
+    # Get permissions from roles
+    role_permissions = db.query(RolePermission).filter(
+        RolePermission.role_id.in_(role_ids)
+    ).all()
+    permission_ids = {rp.permission_id for rp in role_permissions}
+    
+    # Get user-specific permissions (override)
+    user_permissions = db.query(UserPermission).filter(
+        UserPermission.user_id == user_id
+    ).all()
+    user_permission_ids = {up.permission_id for up in user_permissions}
+    
+    # Combine: user permissions override role permissions
+    all_permission_ids = permission_ids | user_permission_ids
+    
+    # Get permission details
+    permissions = db.query(Permission).filter(Permission.id.in_(all_permission_ids)).all()
+    
+    result = {}
+    for p in permissions:
+        if permission_code_exists and p.code:
+            result[p.code] = True
+        else:
+            result[f"{p.page_path}:{p.action}"] = True
+    
+    return result
 
 # Helper function để kiểm tra và redirect nếu không có quyền
 def check_and_redirect_access(role: str, page_path: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> Optional[RedirectResponse]:
-    """Kiểm tra quyền và trả về RedirectResponse nếu không có quyền"""
-    if not check_page_access(role, page_path, user_id, db):
-        return RedirectResponse(url="/access-denied", status_code=303)
+    """Open access: không redirect."""
     return None
 
 # Helper function để lấy IP address từ request
@@ -1116,35 +1475,71 @@ def create_audit_log(
 # Helper function để khởi tạo permissions cho tất cả các pages
 def initialize_permissions(db: Session):
     """Khởi tạo permissions cho tất cả các pages trong hệ thống"""
+    # Kiểm tra column code có tồn tại không
+    permission_code_exists = column_exists('permissions', 'code')
+    
     # Danh sách các pages và mô tả
     pages = [
-        {"path": "/", "name": "home.view", "description": "Trang chủ", "action": "view"},
-        {"path": "/operations", "name": "operations.view", "description": "Quản lý vận hành", "action": "view"},
-        {"path": "/employees", "name": "employees.view", "description": "Quản lý nhân viên", "action": "view"},
-        {"path": "/vehicles", "name": "vehicles.view", "description": "Quản lý xe", "action": "view"},
-        {"path": "/routes", "name": "routes.view", "description": "Quản lý tuyến", "action": "view"},
-        {"path": "/maintenance", "name": "maintenance.view", "description": "Bảo dưỡng xe", "action": "view"},
-        {"path": "/theo-doi-dau-v2", "name": "fuel.view", "description": "Theo dõi dầu", "action": "view"},
-        {"path": "/revenue", "name": "revenue.view", "description": "Doanh thu", "action": "view"},
-        {"path": "/daily-new", "name": "daily.view", "description": "Chấm công hàng ngày", "action": "view"},
-        {"path": "/timekeeping-v1", "name": "timekeeping.view", "description": "Bảng chấm công V1", "action": "view"},
-        {"path": "/salary-calculation-v2", "name": "salary.view", "description": "Tính lương", "action": "view"},
-        {"path": "/finance-report", "name": "finance.view", "description": "Báo cáo tài chính", "action": "view"},
-        {"path": "/financial-statistics", "name": "statistics.view", "description": "Thống kê tài chính", "action": "view"},
-        {"path": "/accounts", "name": "accounts.view", "description": "Quản lý tài khoản", "action": "view"},
+        {"path": "/", "name": "home.view", "code": "home.view", "description": "Trang chủ", "action": "view"},
+        {"path": "/operations", "name": "operations.view", "code": "operations.view", "description": "Quản lý vận hành", "action": "view"},
+        {"path": "/employees", "name": "employees.view", "code": "employee.view", "description": "Quản lý nhân viên", "action": "view"},
+        {"path": "/vehicles", "name": "vehicles.view", "code": "vehicle.view", "description": "Quản lý xe", "action": "view"},
+        {"path": "/routes", "name": "routes.view", "code": "route.view", "description": "Quản lý tuyến", "action": "view"},
+        {"path": "/maintenance", "name": "maintenance.view", "code": "maintenance.view", "description": "Bảo dưỡng xe", "action": "view"},
+        {"path": "/theo-doi-dau-v2", "name": "fuel.view", "code": "fuel.view", "description": "Theo dõi dầu", "action": "view"},
+        {"path": "/revenue", "name": "revenue.view", "code": "revenue.view", "description": "Doanh thu", "action": "view"},
+        {"path": "/daily-new", "name": "daily.view", "code": "daily.view", "description": "Chấm công hàng ngày", "action": "view"},
+        {"path": "/timekeeping-v1", "name": "timekeeping.view", "code": "timekeeping.view", "description": "Bảng chấm công V1", "action": "view"},
+        {"path": "/salary-calculation-v2", "name": "salary.view", "code": "salary.view", "description": "Tính lương", "action": "view"},
+        {"path": "/salary-summary", "name": "salary.summary.view", "code": "salary.summary.view", "description": "Bảng lương tổng", "action": "view"},
+        {"path": "/finance-report", "name": "finance.view", "code": "finance.report.view", "description": "Báo cáo tài chính", "action": "view"},
+        {"path": "/financial-statistics", "name": "statistics.view", "code": "finance.statistics.view", "description": "Thống kê tài chính", "action": "view"},
+        {"path": "/accounts", "name": "accounts.view", "code": "account.view", "description": "Quản lý tài khoản", "action": "view"},
     ]
     
     for page in pages:
-        # Kiểm tra xem permission đã tồn tại chưa
-        existing = db.query(Permission).filter(Permission.page_path == page["path"]).first()
+        # Kiểm tra xem permission đã tồn tại chưa (theo page_path hoặc code nếu có)
+        if permission_code_exists:
+            existing = db.query(Permission).filter(
+                or_(
+                    Permission.page_path == page["path"],
+                    Permission.code == page["code"]
+                )
+            ).first()
+        else:
+            existing = db.query(Permission).filter(Permission.page_path == page["path"]).first()
+        
         if not existing:
-            permission = Permission(
-                name=page["name"],
-                description=page["description"],
-                page_path=page["path"],
-                action=page["action"]
-            )
+            permission_data = {
+                "name": page["name"],
+                "description": page["description"],
+                "page_path": page["path"],
+                "action": page["action"]
+            }
+            # Chỉ thêm code nếu column tồn tại và code chưa được dùng
+            if permission_code_exists:
+                # Kiểm tra xem code đã được dùng bởi permission khác chưa
+                code_exists = db.query(Permission).filter(Permission.code == page["code"]).first()
+                if not code_exists:
+                    permission_data["code"] = page["code"]
+                else:
+                    print(f"Warning: Code '{page['code']}' already exists, skipping for {page['path']}")
+            
+            permission = Permission(**permission_data)
             db.add(permission)
+        elif existing and permission_code_exists and not existing.code:
+            # Update existing permission với code nếu chưa có
+            # Kiểm tra xem code đã được dùng bởi permission khác chưa
+            code_exists = db.query(Permission).filter(
+                and_(
+                    Permission.code == page["code"],
+                    Permission.id != existing.id
+                )
+            ).first()
+            if not code_exists:
+                existing.code = page["code"]
+            else:
+                print(f"Warning: Code '{page['code']}' already exists, cannot update permission {existing.id} ({existing.page_path})")
     
     db.commit()
     print("Permissions initialized successfully")
@@ -1177,8 +1572,23 @@ def generate_password(length: int = 12) -> str:
 # FastAPI app
 app = FastAPI(title="Hệ thống quản lý vận chuyển")
 
-# Thêm SessionMiddleware để quản lý session
-app.add_middleware(SessionMiddleware, secret_key="your-secret-key-change-in-production")
+# Authentication middleware to protect all routes except /login and static files
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Allow access to login page, logout, and static files
+        if request.url.path in ["/login", "/logout"] or request.url.path.startswith("/static/"):
+            return await call_next(request)
+        
+        # Check if user is logged in
+        if not request.session.get("user_id"):
+            return RedirectResponse(url="/login", status_code=303)
+        
+        return await call_next(request)
+
+# Add middleware in correct order: SessionMiddleware must be added AFTER AuthMiddleware
+# so it runs first (middleware executes in reverse order of addition)
+app.add_middleware(AuthMiddleware)
+app.add_middleware(SessionMiddleware, secret_key="local-dev-secret-key-12345")
 
 # ==================== FILE UPLOAD HELPER FUNCTIONS ====================
 # Cấu trúc thư mục ảnh: Picture/{category}/{subcategory}/
@@ -1189,6 +1599,55 @@ def ensure_directory_exists(directory_path: str):
     if not os.path.exists(directory_path):
         os.makedirs(directory_path, exist_ok=True)
     return directory_path
+
+# ==================== DOCUMENTS UPLOAD CONFIGURATION ====================
+# Base directory for document uploads
+DOCUMENTS_UPLOAD_DIR = "uploads/documents"
+
+# Allowed document file types
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"}
+
+def ensure_document_dirs():
+    """Ensure document upload directories exist"""
+    # Create main documents directory
+    ensure_directory_exists(DOCUMENTS_UPLOAD_DIR)
+    
+    # Create subdirectories by type/category
+    subdirs = ["contracts", "company", "tax", "others"]
+    for subdir in subdirs:
+        ensure_directory_exists(os.path.join(DOCUMENTS_UPLOAD_DIR, subdir))
+
+def get_document_category_folder(category: str, document_type: str) -> str:
+    """Map category/document_type to folder structure"""
+    # Map categories to folders
+    category_map = {
+        "legal": "contracts",
+        "administrative": "company", 
+        "tax": "tax"
+    }
+    
+    # Default folder based on category
+    folder = category_map.get(category, "others")
+    
+    # Special handling for certain document types
+    if document_type and "contract" in document_type.lower():
+        folder = "contracts"
+    elif document_type and "tax" in document_type.lower():
+        folder = "tax"
+    
+    return folder
+
+def validate_document_file(filename: str) -> Tuple[bool, Optional[str]]:
+    """Validate document file type. Returns (is_valid, error_message)"""
+    if not filename:
+        return False, "No file provided"
+    
+    file_ext = os.path.splitext(filename)[1].lower()
+    if file_ext not in ALLOWED_DOCUMENT_EXTENSIONS:
+        allowed_types = ", ".join(sorted(ALLOWED_DOCUMENT_EXTENSIONS))
+        return False, f"File type not allowed. Only {allowed_types} files are supported."
+    
+    return True, None
 
 def save_uploaded_file(
     file: UploadFile,
@@ -1291,14 +1750,56 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 ensure_directory_exists(PICTURE_BASE_DIR)
 app.mount("/Picture", StaticFiles(directory=PICTURE_BASE_DIR), name="picture")
 
+# Mount documents upload directory
+ensure_document_dirs()
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Ensure administrative documents directory exists (function is defined later in file)
+
 # Templates đã được tạo ở trên với custom filters
 
 # ==================== AUTHENTICATION ROUTES ====================
 
+def hash_password(password: str, *, iterations: int = 210_000) -> str:
+    """
+    PBKDF2-HMAC-SHA256 password hashing (stdlib only).
+    Stored format: pbkdf2_sha256$<iterations>$<salt_b64>$<hash_b64>
+    """
+    import base64
+    import hashlib
+    import secrets
+
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return "pbkdf2_sha256$%d$%s$%s" % (
+        iterations,
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(dk).decode("ascii"),
+    )
+
+def verify_password(password: str, stored: str) -> bool:
+    import base64
+    import hashlib
+    import hmac
+
+    if not stored or "$" not in stored:
+        return False
+    try:
+        algo, iter_s, salt_b64, hash_b64 = stored.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        iterations = int(iter_s)
+        salt = base64.b64decode(salt_b64.encode("ascii"))
+        expected = base64.b64decode(hash_b64.encode("ascii"))
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Trang đăng nhập"""
-    # Nếu đã đăng nhập, redirect về trang chủ
+    # If user is already logged in, redirect to home
     if request.session.get("user_id"):
         return RedirectResponse(url="/", status_code=303)
     
@@ -1314,46 +1815,54 @@ async def login(
     password: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    """Xử lý đăng nhập"""
-    # Tìm tài khoản trong database
+    """Authenticate user and create session"""
+
+    # Find account in database
     account = db.query(Account).filter(Account.username == username).first()
     
-    # Kiểm tra tài khoản và mật khẩu
-    if not account or account.password != password:
+    # Check if account exists
+    if not account:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Sai tài khoản hoặc mật khẩu"
+        })
+
+    # Check password (plain text comparison as requested)
+    # Check both password and password_hash fields for backward compatibility
+    password_match = False
+    if account.password and account.password == password:
+        password_match = True
+    elif account.password_hash and account.password_hash == password:
+        password_match = True
+    
+    if not password_match:
         return templates.TemplateResponse("login.html", {
             "request": request,
             "error": "Sai tài khoản hoặc mật khẩu"
         })
     
-    # Kiểm tra tài khoản có bị khoá không
-    if account.is_locked == 1:
-        return templates.TemplateResponse("login.html", {
-            "request": request,
-            "error": "Tài khoản đã bị khoá. Vui lòng liên hệ quản trị viên."
-        })
-    
-    # Kiểm tra trạng thái
+    # Check status must be 'Active'
     if account.status != "Active":
         return templates.TemplateResponse("login.html", {
             "request": request,
-            "error": "Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên."
+            "error": "Tài khoản không hoạt động. Vui lòng liên hệ quản trị viên."
         })
     
-    # Cập nhật last_login
+    # Update last_login
     account.last_login = datetime.utcnow()
     db.commit()
     
-    # Lưu thông tin vào session
+    # Store user info in session
     request.session["user_id"] = account.id
     request.session["username"] = account.username
-    request.session["role"] = account.role
+    request.session["role"] = account.role or "User"
     
-    # Redirect về trang chủ
+    # Redirect to home
     return RedirectResponse(url="/", status_code=303)
 
 @app.post("/logout")
 async def logout(request: Request):
-    """Đăng xuất"""
+    """Clear session and redirect to login"""
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
@@ -1367,15 +1876,6 @@ async def access_denied_page(request: Request, current_user = Depends(get_curren
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    # Nếu chưa đăng nhập, redirect về trang login
-    if current_user is None:
-        return RedirectResponse(url="/login", status_code=303)
-    
-    # Kiểm tra quyền truy cập
-    redirect_response = check_and_redirect_access(current_user["role"], "/", current_user["id"], db)
-    if redirect_response:
-        return redirect_response
-    
     # Lấy thống kê tổng quan
     employees_count = db.query(Employee).count()
     vehicles_count = db.query(Vehicle).count()
@@ -1393,29 +1893,13 @@ async def home(request: Request, db: Session = Depends(get_db), current_user = D
     })
 
 @app.get("/report", response_class=HTMLResponse)
-async def report_page(request: Request, current_user = Depends(get_current_user)):
+async def report_page(request: Request):
     """Trang báo cáo tổng hợp - redirect tới trang thống kê"""
-    # Nếu chưa đăng nhập, redirect về login
-    if current_user is None:
-        return RedirectResponse(url="/login", status_code=303)
-    
     # Redirect tới trang thống kê
     return RedirectResponse(url="/statistics", status_code=303)
-    
-    return templates.TemplateResponse("report.html", {
-        "request": request,
-        "current_user": current_user
-    })
 
 @app.get("/employees", response_class=HTMLResponse)
 async def employees_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    # Nếu chưa đăng nhập, redirect về login
-    if current_user is None:
-        return RedirectResponse(url="/login", status_code=303)
-    
-    # Chỉ Admin mới được truy cập
-    if current_user["role"] != "Admin":
-        return RedirectResponse(url="/daily-new", status_code=303)
     employees = db.query(Employee).filter(Employee.status == 1).all()
     
     # Sắp xếp nhân viên: Ưu tiên 1 (theo trạng thái), Ưu tiên 2 (theo chức vụ)
@@ -1831,13 +2315,6 @@ async def delete_employee_document(
 
 @app.get("/vehicles", response_class=HTMLResponse)
 async def vehicles_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    # Nếu chưa đăng nhập, redirect về login
-    if current_user is None:
-        return RedirectResponse(url="/login", status_code=303)
-    
-    # Chỉ Admin mới được truy cập
-    if current_user["role"] != "Admin":
-        return RedirectResponse(url="/daily-new", status_code=303)
     vehicles = db.query(Vehicle).filter(Vehicle.status == 1).all()
     today = date.today()
     
@@ -2712,13 +3189,6 @@ async def transfer_vehicle_assignment(
 @app.get("/maintenance", response_class=HTMLResponse)
 async def maintenance_page(request: Request, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Trang danh sách bảo dưỡng xe"""
-    # Nếu chưa đăng nhập, redirect về login
-    if current_user is None:
-        return RedirectResponse(url="/login", status_code=303)
-    
-    # Chỉ Admin và User mới được truy cập
-    if current_user["role"] not in ["Admin", "User"]:
-        return RedirectResponse(url="/login", status_code=303)
     
     # Lấy danh sách xe có loại = "Xe Nhà"
     vehicles = db.query(Vehicle).filter(
@@ -2757,11 +3227,8 @@ async def maintenance_page(request: Request, db: Session = Depends(get_db), curr
     })
 
 @app.get("/maintenance/detail/{vehicle_id}", response_class=JSONResponse)
-async def get_maintenance_detail(vehicle_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+async def get_maintenance_detail(vehicle_id: int, db: Session = Depends(get_db)):
     """Lấy danh sách bảo dưỡng của một xe"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
     # Kiểm tra xe có tồn tại và là "Xe Nhà"
     vehicle = db.query(Vehicle).filter(
         Vehicle.id == vehicle_id,
@@ -2825,9 +3292,6 @@ async def add_maintenance(
     current_user = Depends(get_current_user)
 ):
     """Thêm mới bảo dưỡng xe"""
-    if current_user is None:
-        return JSONResponse({"success": False, "error": "Chưa đăng nhập"}, status_code=401)
-    
     try:
         # Kiểm tra xe có tồn tại và là "Xe Nhà"
         vehicle = db.query(Vehicle).filter(
@@ -6167,10 +6631,16 @@ async def compare_fuel_quota_with_actual(
     fuel_consumption = vehicle.fuel_consumption
     
     # Lấy dữ liệu chấm công theo khoảng ngày và biển số
+    # CHỈ LẤY CÁC BẢN GHI CÓ STATUS = ON/ONLINE/Onl (BẮT BUỘC)
     details = db.query(TimekeepingDetail).filter(
         TimekeepingDetail.license_plate == license_plate.strip(),
         TimekeepingDetail.date >= from_date_obj,
-        TimekeepingDetail.date <= to_date_obj
+        TimekeepingDetail.date <= to_date_obj,
+        or_(
+            TimekeepingDetail.status == "Onl",
+            TimekeepingDetail.status == "ONLINE",
+            TimekeepingDetail.status == "ON"
+        )
     ).all()
     
     trips_data = []
@@ -6178,8 +6648,23 @@ async def compare_fuel_quota_with_actual(
     total_quota_cost = 0
     skipped_no_distance = 0
     skipped_no_price = 0
+    skipped_off_status = 0
+    
+    skipped_route_off = 0
     
     for detail in details:
+        # Kiểm tra an toàn: bỏ qua nếu status là OFF (case-insensitive)
+        if detail.status and detail.status.strip().upper() == "OFF":
+            skipped_off_status += 1
+            continue
+        
+        # 🔍 KIỂM TRA ROUTE STATUS: Nếu route bị OFF trong ngày đó → KHÔNG tính dầu
+        route_code_to_check = detail.route_code or detail.route_name or ""
+        if route_code_to_check:
+            if is_route_off_on_date(db, route_code_to_check, detail.date, license_plate.strip()):
+                skipped_route_off += 1
+                continue
+        
         distance_km = detail.distance_km or 0
         if distance_km <= 0:
             skipped_no_distance += 1
@@ -6242,6 +6727,8 @@ async def compare_fuel_quota_with_actual(
         "meta": {
             "skipped_no_distance": skipped_no_distance,
             "skipped_no_price": skipped_no_price,
+            "skipped_off_status": skipped_off_status,
+            "skipped_route_off": skipped_route_off,
             "license_plate": license_plate.strip(),
             "from_date": from_date_obj.isoformat(),
             "to_date": to_date_obj.isoformat()
@@ -6325,10 +6812,16 @@ async def export_fuel_quota_excel(
     fuel_consumption = vehicle.fuel_consumption
     
     # Lấy dữ liệu chấm công theo khoảng ngày và biển số
+    # CHỈ LẤY CÁC BẢN GHI CÓ STATUS = ON/ONLINE/Onl (BẮT BUỘC)
     details = db.query(TimekeepingDetail).filter(
         TimekeepingDetail.license_plate == license_plate.strip(),
         TimekeepingDetail.date >= from_date_obj,
-        TimekeepingDetail.date <= to_date_obj
+        TimekeepingDetail.date <= to_date_obj,
+        or_(
+            TimekeepingDetail.status == "Onl",
+            TimekeepingDetail.status == "ONLINE",
+            TimekeepingDetail.status == "ON"
+        )
     ).all()
     
     trips_data = []
@@ -6336,6 +6829,16 @@ async def export_fuel_quota_excel(
     total_quota_cost = 0
     
     for detail in details:
+        # Kiểm tra an toàn: bỏ qua nếu status là OFF (case-insensitive)
+        if detail.status and detail.status.strip().upper() == "OFF":
+            continue
+        
+        # 🔍 KIỂM TRA ROUTE STATUS: Nếu route bị OFF trong ngày đó → KHÔNG tính dầu
+        route_code_to_check = detail.route_code or detail.route_name or ""
+        if route_code_to_check:
+            if is_route_off_on_date(db, route_code_to_check, detail.date, license_plate.strip()):
+                continue
+        
         distance_km = detail.distance_km or 0
         if distance_km <= 0:
             continue
@@ -7085,6 +7588,324 @@ def calculate_trip_salary(result: TimekeepingDetail, db: Session) -> float:
     # Mặc định: trả về 0 nếu không khớp với bất kỳ quy tắc nào
     return 0.0
 
+# ==================== MONTHLY SALARY SUMMARY SERVICE ====================
+
+def get_fuel_monthly_summary_by_driver(db: Session, driver_name: str, month: str) -> dict:
+    """
+    Lấy tổng hợp dầu theo lái xe và tháng, sử dụng CÙNG LOGIC với tab "Khoán dầu".
+    Đây là NGUỒN DỮ LIỆU CHUẨN cho dầu trong bảng lương tổng.
+    
+    Args:
+        db: Database session
+        driver_name: Tên lái xe
+        month: Tháng định dạng "YYYY-MM" (ví dụ: "2025-01")
+    
+    Returns:
+        Dictionary với các key:
+        - fuel_quota_liter: Tổng dầu khoán (lít) - từ các chuyến có Km > 0 và có giá dầu
+        - fuel_used_liter: Tổng dầu đã đổ (lít) - từ fuel_records
+        - fuel_money: Tổng tiền dầu khoán (VNĐ)
+    """
+    try:
+        # Parse month
+        year, month_num = map(int, month.split('-'))
+        start_date = date(year, month_num, 1)
+        # Tính ngày cuối cùng của tháng
+        if month_num == 12:
+            end_date = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = date(year, month_num + 1, 1) - timedelta(days=1)
+        
+        # Lấy tất cả chuyến của lái xe trong tháng (chỉ Xe Nhà)
+        # Logic giống với compare_fuel_quota_with_actual
+        # CHỈ LẤY CÁC BẢN GHI CÓ STATUS = ON/ONLINE/Onl (BẮT BUỘC)
+        details = db.query(TimekeepingDetail).filter(
+            TimekeepingDetail.driver_name == driver_name.strip(),
+            TimekeepingDetail.date >= start_date,
+            TimekeepingDetail.date <= end_date,
+            or_(
+                TimekeepingDetail.status == "Onl",
+                TimekeepingDetail.status == "ONLINE",
+                TimekeepingDetail.status == "ON"
+            )
+        ).all()
+        
+        total_quota_liters = 0.0
+        total_quota_cost = 0
+        
+        # Lấy danh sách license_plate từ các chuyến để kiểm tra Xe Nhà
+        license_plates_set = set()
+        for detail in details:
+            if detail.license_plate:
+                license_plates_set.add(detail.license_plate.strip())
+        
+        # Lấy thông tin xe để kiểm tra vehicle_type
+        vehicles_info = {}
+        if license_plates_set:
+            vehicles = db.query(Vehicle).filter(
+                Vehicle.license_plate.in_(list(license_plates_set)),
+                Vehicle.status == 1
+            ).all()
+            for vehicle in vehicles:
+                vehicles_info[vehicle.license_plate] = {
+                    'vehicle_type': vehicle.vehicle_type,
+                    'fuel_consumption': vehicle.fuel_consumption
+                }
+        
+        # Tính dầu khoán - CHỈ cho Xe Nhà, có Km > 0, và có giá dầu
+        for detail in details:
+            # Kiểm tra an toàn: bỏ qua nếu status là OFF (case-insensitive)
+            if detail.status and detail.status.strip().upper() == "OFF":
+                continue
+            
+            distance_km = detail.distance_km or 0
+            if distance_km <= 0:
+                continue
+            
+            license_plate = (detail.license_plate or "").strip()
+            if not license_plate:
+                continue
+            
+            # Chỉ tính cho Xe Nhà
+            vehicle_info = vehicles_info.get(license_plate)
+            if not vehicle_info or vehicle_info['vehicle_type'] != 'Xe Nhà':
+                continue
+            
+            # 🔍 KIỂM TRA ROUTE STATUS: Nếu route bị OFF trong ngày đó → KHÔNG tính dầu
+            route_code_to_check = detail.route_code or detail.route_name or ""
+            if route_code_to_check:
+                if is_route_off_on_date(db, route_code_to_check, detail.date, license_plate):
+                    continue
+            
+            # Kiểm tra định mức nhiên liệu
+            fuel_consumption = vehicle_info.get('fuel_consumption')
+            if not fuel_consumption or fuel_consumption <= 0:
+                continue
+            
+            # Lấy giá dầu theo ngày chuyến
+            fuel_price_record = get_fuel_price_by_date(db, detail.date)
+            if fuel_price_record is None or fuel_price_record.unit_price is None:
+                continue
+            
+            # Tính dầu khoán - CÙNG LOGIC với tab Khoán dầu
+            dk_liters = round((distance_km * fuel_consumption) / 100.0, 2)
+            fuel_cost = int(round(dk_liters * fuel_price_record.unit_price))
+            
+            total_quota_liters += dk_liters
+            total_quota_cost += fuel_cost
+        
+        # Tính dầu đã đổ từ fuel_records
+        # Lấy danh sách license_plate từ các chuyến của lái xe (chỉ Xe Nhà)
+        xe_nha_plates = []
+        for license_plate in license_plates_set:
+            vehicle_info = vehicles_info.get(license_plate)
+            if vehicle_info and vehicle_info['vehicle_type'] == 'Xe Nhà':
+                xe_nha_plates.append(license_plate)
+        
+        fuel_used = 0.0
+        if xe_nha_plates:
+            fuel_used_query = db.query(func.sum(FuelRecord.liters_pumped)).filter(
+                FuelRecord.date >= start_date,
+                FuelRecord.date <= end_date,
+                FuelRecord.license_plate.in_(xe_nha_plates)
+            )
+            fuel_used = fuel_used_query.scalar() or 0.0
+        
+        return {
+            "fuel_quota_liter": round(total_quota_liters, 2),
+            "fuel_used_liter": round(fuel_used, 2),
+            "fuel_money": int(total_quota_cost)
+        }
+    
+    except Exception as e:
+        print(f"Error getting fuel monthly summary for driver {driver_name}, month {month}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "fuel_quota_liter": 0.0,
+            "fuel_used_liter": 0.0,
+            "fuel_money": 0
+        }
+
+def calculate_monthly_salary_summary(db: Session, month: str) -> list:
+    """
+    Tính bảng lương tổng theo tháng cho tất cả nhân viên.
+    
+    Args:
+        db: Database session
+        month: Tháng định dạng "YYYY-MM" (ví dụ: "2025-01")
+    
+    Returns:
+        List of dictionaries với các key:
+        - user_id: ID nhân viên
+        - month: Tháng (YYYY-MM)
+        - full_name: Tên đầy đủ
+        - working_days: Số ngày công
+        - total_trips: Tổng số chuyến
+        - trip_salary: Tổng lương chuyến (VNĐ)
+        - fuel_quota: Tổng dầu khoán (lít)
+        - fuel_used: Tổng dầu đã đổ (lít)
+        - fuel_money_diff: Số tiền dầu dư (VNĐ) - có thể âm hoặc dương
+        - fuel_price: Giá dầu trung bình (VNĐ/lít)
+    """
+    try:
+        # Parse month
+        year, month_num = map(int, month.split('-'))
+        start_date = date(year, month_num, 1)
+        # Tính ngày cuối cùng của tháng
+        if month_num == 12:
+            end_date = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = date(year, month_num + 1, 1) - timedelta(days=1)
+        
+        # Lấy tất cả nhân viên đang làm việc (lái xe)
+        employees = db.query(Employee).filter(
+            Employee.status == 1,
+            Employee.employee_status == "Đang làm việc"
+        ).all()
+        
+        results = []
+        
+        for employee in employees:
+            employee_name = employee.name.strip() if employee.name else ""
+            if not employee_name:
+                continue
+            
+            # 1. Tính NGÀY CÔNG: COUNT DISTINCT ngày có status = "Onl" hoặc "ONLINE" hoặc "ON"
+            working_days_query = db.query(func.count(func.distinct(TimekeepingDetail.date))).filter(
+                TimekeepingDetail.driver_name == employee_name,
+                TimekeepingDetail.date >= start_date,
+                TimekeepingDetail.date <= end_date,
+                or_(
+                    TimekeepingDetail.status == "Onl",
+                    TimekeepingDetail.status == "ONLINE",
+                    TimekeepingDetail.status == "ON"
+                )
+            )
+            working_days = working_days_query.scalar() or 0
+            
+            # 2. Tính SỐ CHUYẾN: COUNT chuyến có status = "Onl" hoặc "ONLINE" hoặc "ON"
+            total_trips_query = db.query(func.count(TimekeepingDetail.id)).filter(
+                TimekeepingDetail.driver_name == employee_name,
+                TimekeepingDetail.date >= start_date,
+                TimekeepingDetail.date <= end_date,
+                or_(
+                    TimekeepingDetail.status == "Onl",
+                    TimekeepingDetail.status == "ONLINE",
+                    TimekeepingDetail.status == "ON"
+                )
+            )
+            total_trips = total_trips_query.scalar() or 0
+            
+            # 3. Tính LƯƠNG CHUYẾN: SUM của calculate_trip_salary() hoặc total_amount
+            # Lấy tất cả chuyến trong tháng
+            trips = db.query(TimekeepingDetail).filter(
+                TimekeepingDetail.driver_name == employee_name,
+                TimekeepingDetail.date >= start_date,
+                TimekeepingDetail.date <= end_date,
+                or_(
+                    TimekeepingDetail.status == "Onl",
+                    TimekeepingDetail.status == "ONLINE",
+                    TimekeepingDetail.status == "ON"
+                )
+            ).all()
+            
+            trip_salary = 0.0
+            for trip in trips:
+                # Tính lương chuyến
+                salary = calculate_trip_salary(trip, db)
+                trip_salary += salary
+            
+            # Làm tròn lương chuyến
+            trip_salary = round(trip_salary, 0)
+            
+            # 4. LẤY DỮ LIỆU DẦU TỪ NGUỒN CHUẨN: Tab "Khoán dầu"
+            # KHÔNG tính dầu từ trips nữa, chỉ lấy từ get_fuel_monthly_summary_by_driver()
+            fuel_summary = get_fuel_monthly_summary_by_driver(db, employee_name, month)
+            fuel_quota_total = fuel_summary["fuel_quota_liter"]
+            fuel_used = fuel_summary["fuel_used_liter"]
+            fuel_money_total = fuel_summary["fuel_money"]
+            
+            # 5. Tính SỐ TIỀN DẦU DƯ: fuel_money - (fuel_used × giá dầu trung bình)
+            # Hoặc đơn giản hơn: (fuel_quota - fuel_used) × giá dầu trung bình
+            # Nhưng để đảm bảo khớp với tab Khoán dầu, ta tính từ fuel_money đã có
+            # fuel_money = tổng tiền dầu khoán từ các chuyến
+            # Tính giá dầu trung bình từ fuel_money và fuel_quota
+            avg_fuel_price = 0
+            if fuel_quota_total > 0:
+                avg_fuel_price = fuel_money_total / fuel_quota_total
+            else:
+                # Nếu không có dầu khoán, lấy giá dầu cuối cùng của tháng
+                fuel_price_record = get_fuel_price_by_date(db, end_date)
+                if fuel_price_record and fuel_price_record.unit_price:
+                    avg_fuel_price = fuel_price_record.unit_price
+            
+            # Tính tiền dầu dư: (fuel_quota - fuel_used) × giá dầu trung bình
+            fuel_money_diff = (fuel_quota_total - fuel_used) * avg_fuel_price
+            fuel_money_diff = round(fuel_money_diff, 0)
+            
+            # Kiểm tra xem có dữ liệu đã lưu cho tháng này không
+            saved_salary = db.query(SalaryMonthly).filter(
+                SalaryMonthly.employee_id == employee.id,
+                SalaryMonthly.month == month_num,
+                SalaryMonthly.year == year
+            ).first()
+            
+            # Nếu có dữ liệu đã lưu, dùng dữ liệu đó; nếu không, dùng 0
+            bao_hiem_xh = saved_salary.bao_hiem_xh if saved_salary else 0
+            rua_xe = saved_salary.rua_xe if saved_salary else 0
+            tien_trach_nhiem = saved_salary.tien_trach_nhiem if saved_salary else 0
+            ung_luong = saved_salary.ung_luong if saved_salary else 0
+            sua_xe = saved_salary.sua_xe if saved_salary else 0
+            
+            results.append({
+                "user_id": employee.id,
+                "month": month,
+                "full_name": employee_name,
+                "working_days": working_days,
+                "total_trips": total_trips,
+                "trip_salary": int(trip_salary),
+                "fuel_quota": round(fuel_quota_total, 2),
+                "fuel_used": round(fuel_used, 2),
+                "fuel_money_diff": int(fuel_money_diff),
+                "fuel_price": int(avg_fuel_price) if avg_fuel_price > 0 else 0,
+                # Các cột manual: lấy từ saved data nếu có, nếu không thì = 0
+                "bao_hiem_xh": bao_hiem_xh,
+                "rua_xe": rua_xe,
+                "tien_trach_nhiem": tien_trach_nhiem,
+                "ung_luong": ung_luong,
+                "sua_xe": sua_xe
+            })
+        
+        # Sắp xếp theo tên: những người có tên cụ thể sẽ hiển thị ở dòng dưới cùng
+        # Danh sách người cần đẩy xuống cuối
+        bottom_names = {
+            "Mr Ba",
+            "Lê Bá Thắng",
+            "Nguyễn Công Hảo",
+            "Nguyễn Trang Kiều",
+            "Nguyễn Văn Luận"
+        }
+        
+        def sort_key(item):
+            full_name = item["full_name"]
+            # Nếu tên trong danh sách bottom_names, trả về (1, name) để đẩy xuống cuối
+            # Nếu không, trả về (0, name) để giữ ở trên
+            if full_name in bottom_names:
+                return (1, full_name)
+            else:
+                return (0, full_name)
+        
+        results.sort(key=sort_key)
+        
+        return results
+    
+    except Exception as e:
+        print(f"Error calculating monthly salary summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
 def get_partner_vehicle_unit_price(license_plate: str, route_type: str, route_code: str, route_name: str) -> float:
     """
     Lấy đơn giá theo km cho xe đối tác:
@@ -7160,6 +7981,440 @@ def calculate_partner_vehicle_payment(result: TimekeepingDetail, db: Session) ->
     # Mặc định: nếu không khớp với bất kỳ quy tắc nào, trả về 0
     return 0.0
 
+# ==================== MONTHLY SALARY SUMMARY API ====================
+
+@app.get("/api/salary-summary")
+async def get_salary_summary(
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    API: Lấy bảng lương tổng theo tháng
+    
+    Args:
+        month: Tháng định dạng "YYYY-MM" (ví dụ: "2025-01")
+               Nếu không có, mặc định là tháng hiện tại
+    
+    Returns:
+        JSON response với danh sách bảng lương tổng
+    """
+    try:
+        # Nếu không có month, dùng tháng hiện tại
+        if not month:
+            today = date.today()
+            month = f"{today.year}-{today.month:02d}"
+        
+        # Validate format
+        try:
+            year, month_num = map(int, month.split('-'))
+            if month_num < 1 or month_num > 12:
+                return JSONResponse({
+                    "success": False,
+                    "message": "Tháng không hợp lệ. Format: YYYY-MM"
+                }, status_code=400)
+        except ValueError:
+            return JSONResponse({
+                "success": False,
+                "message": "Format tháng không đúng. Format: YYYY-MM"
+            }, status_code=400)
+        
+        # Tính bảng lương tổng
+        results = calculate_monthly_salary_summary(db, month)
+        
+        return JSONResponse({
+            "success": True,
+            "month": month,
+            "data": results,
+            "count": len(results)
+        })
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi tính bảng lương: {str(e)}"
+        }, status_code=500)
+
+@app.get("/salary-summary", response_class=HTMLResponse)
+async def salary_summary_page(
+    request: Request,
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Trang hiển thị bảng lương tổng theo tháng
+    """
+    # Nếu không có month, dùng tháng hiện tại
+    if not month:
+        today = date.today()
+        month = f"{today.year}-{today.month:02d}"
+    
+    # Validate format
+    try:
+        year, month_num = map(int, month.split('-'))
+        if month_num < 1 or month_num > 12:
+            month = f"{date.today().year}-{date.today().month:02d}"
+    except ValueError:
+        month = f"{date.today().year}-{date.today().month:02d}"
+    
+    # Tính bảng lương tổng
+    salary_data = calculate_monthly_salary_summary(db, month)
+    
+    # Tính tổng các cột
+    totals = {
+        "working_days": sum(item["working_days"] for item in salary_data),
+        "total_trips": sum(item["total_trips"] for item in salary_data),
+        "trip_salary": sum(item["trip_salary"] for item in salary_data),
+        # Giữ lại các trường fuel để tương thích (có thể dùng cho export)
+        "fuel_quota": round(sum(item.get("fuel_quota", 0) for item in salary_data), 2),
+        "fuel_used": round(sum(item.get("fuel_used", 0) for item in salary_data), 2),
+        "fuel_money_diff": sum(item.get("fuel_money_diff", 0) for item in salary_data)
+    }
+    
+    return templates.TemplateResponse("salary_summary.html", {
+        "request": request,
+        "current_user": current_user,
+        "month": month,
+        "salary_data": salary_data,
+        "totals": totals
+    })
+
+@app.post("/api/salary-summary/save")
+async def save_salary_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    API: Lưu snapshot lương tháng cho các lái xe
+    Body: {
+        "month": "2025-01",
+        "salary_data": [
+            {
+                "user_id": 1,
+                "bao_hiem_xh": 100000,
+                "rua_xe": 50000,
+                "tien_trach_nhiem": 200000,
+                "ung_luong": 500000,
+                "sua_xe": 300000
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        # Lấy dữ liệu từ request body
+        body = await request.json()
+        month = body.get("month")
+        salary_data = body.get("salary_data", [])
+        
+        if not month:
+            return JSONResponse({
+                "success": False,
+                "message": "Thiếu thông tin tháng"
+            }, status_code=400)
+        
+        # Validate format
+        try:
+            year, month_num = map(int, month.split('-'))
+            if month_num < 1 or month_num > 12:
+                return JSONResponse({
+                    "success": False,
+                    "message": "Tháng không hợp lệ"
+                }, status_code=400)
+        except ValueError:
+            return JSONResponse({
+                "success": False,
+                "message": "Format tháng không đúng. Format: YYYY-MM"
+            }, status_code=400)
+        
+        # Lưu từng bản ghi
+        saved_count = 0
+        for item in salary_data:
+            user_id = item.get("user_id")
+            if not user_id:
+                continue
+            
+            # Kiểm tra xem employee có tồn tại không
+            employee = db.query(Employee).filter(Employee.id == user_id).first()
+            if not employee:
+                continue
+            
+            # Lấy giá trị các trường manual (mặc định 0 nếu không có)
+            bao_hiem_xh = int(item.get("bao_hiem_xh", 0) or 0)
+            rua_xe = int(item.get("rua_xe", 0) or 0)
+            tien_trach_nhiem = int(item.get("tien_trach_nhiem", 0) or 0)
+            ung_luong = int(item.get("ung_luong", 0) or 0)
+            sua_xe = int(item.get("sua_xe", 0) or 0)
+            
+            # Tìm bản ghi đã tồn tại
+            existing = db.query(SalaryMonthly).filter(
+                SalaryMonthly.employee_id == user_id,
+                SalaryMonthly.month == month_num,
+                SalaryMonthly.year == year
+            ).first()
+            
+            if existing:
+                # Cập nhật bản ghi đã tồn tại
+                existing.bao_hiem_xh = bao_hiem_xh
+                existing.rua_xe = rua_xe
+                existing.tien_trach_nhiem = tien_trach_nhiem
+                existing.ung_luong = ung_luong
+                existing.sua_xe = sua_xe
+                existing.updated_at = datetime.utcnow()
+            else:
+                # Tạo bản ghi mới
+                new_record = SalaryMonthly(
+                    employee_id=user_id,
+                    month=month_num,
+                    year=year,
+                    bao_hiem_xh=bao_hiem_xh,
+                    rua_xe=rua_xe,
+                    tien_trach_nhiem=tien_trach_nhiem,
+                    ung_luong=ung_luong,
+                    sua_xe=sua_xe
+                )
+                db.add(new_record)
+            
+            saved_count += 1
+        
+        # Commit tất cả thay đổi
+        db.commit()
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Đã lưu lương tháng {month} cho {saved_count} nhân viên",
+            "saved_count": saved_count
+        })
+    
+    except Exception as e:
+        db.rollback()
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi lưu dữ liệu: {str(e)}"
+        }, status_code=500)
+
+@app.get("/api/salary-summary/export-excel")
+@app.post("/api/salary-summary/export-excel")
+async def export_salary_summary_excel(
+    request: Request,
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Export bảng lương tổng ra file Excel
+    Hỗ trợ cả GET (tương thích ngược) và POST (với dữ liệu từ input fields)
+    """
+    try:
+        # Nếu là POST request, lấy dữ liệu từ body
+        manual_salary_data = None
+        if request.method == "POST":
+            try:
+                body = await request.json()
+                month = body.get("month") or month
+                manual_salary_data = body.get("salary_data")
+            except:
+                pass
+        
+        # Nếu không có month, dùng tháng hiện tại
+        if not month:
+            today = date.today()
+            month = f"{today.year}-{today.month:02d}"
+        
+        # Validate format
+        try:
+            year, month_num = map(int, month.split('-'))
+            if month_num < 1 or month_num > 12:
+                month = f"{date.today().year}-{date.today().month:02d}"
+        except ValueError:
+            month = f"{date.today().year}-{date.today().month:02d}"
+        
+        # Nếu có dữ liệu từ POST (manual input), dùng dữ liệu đó
+        # Nếu không, tính từ database
+        if manual_salary_data:
+            salary_data = manual_salary_data
+        else:
+            # Tính bảng lương tổng từ database
+            salary_data_db = calculate_monthly_salary_summary(db, month)
+            # Convert sang format giống với manual data
+            salary_data = []
+            for item in salary_data_db:
+                salary_data.append({
+                    "full_name": item["full_name"],
+                    "working_days": item["working_days"],
+                    "total_trips": item["total_trips"],
+                    "trip_salary": item["trip_salary"],
+                    "bao_hiem_xh": item.get("bao_hiem_xh", 0),
+                    "rua_xe": item.get("rua_xe", 0),
+                    "tien_trach_nhiem": item.get("tien_trach_nhiem", 0),
+                    "ung_luong": item.get("ung_luong", 0),
+                    "sua_xe": item.get("sua_xe", 0),
+                    "con_lai": item["trip_salary"] - item.get("bao_hiem_xh", 0) - item.get("tien_trach_nhiem", 0) - item.get("ung_luong", 0) + item.get("rua_xe", 0) + item.get("sua_xe", 0)
+                })
+        
+        if not salary_data:
+            return JSONResponse({
+                "success": False,
+                "message": "Không có dữ liệu để xuất Excel"
+            }, status_code=404)
+        
+        # Tạo workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = f"Bang Luong {month}"
+        
+        # Header style
+        header_fill = PatternFill(start_color="667eea", end_color="764ba2", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=12)
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Title
+        ws.merge_cells('A1:K1')
+        ws['A1'] = f"BẢNG LƯƠNG TỔNG THEO THÁNG {month}"
+        ws['A1'].font = Font(bold=True, size=16)
+        ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 30
+        
+        # Headers - Cập nhật với các cột mới
+        headers = [
+            "STT", 
+            "Họ tên", 
+            "Ngày công", 
+            "Số chuyến", 
+            "Lương chuyến (VNĐ)",
+            "Bảo hiểm XH (VNĐ)",
+            "Rửa xe (VNĐ)",
+            "Tiền trách nhiệm (VNĐ)",
+            "Ứng lương (VNĐ)",
+            "Sửa xe (VNĐ)",
+            "Còn lại (VNĐ)"
+        ]
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws.cell(row=3, column=col_idx, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+            cell.border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+        
+        # Data rows
+        for row_idx, item in enumerate(salary_data, start=4):
+            ws.cell(row=row_idx, column=1, value=row_idx - 3)  # STT
+            ws.cell(row=row_idx, column=2, value=item.get("full_name", ""))
+            ws.cell(row=row_idx, column=3, value=item.get("working_days", 0))
+            ws.cell(row=row_idx, column=4, value=item.get("total_trips", 0))
+            
+            # Lương chuyến
+            trip_salary = float(item.get("trip_salary", 0))
+            ws.cell(row=row_idx, column=5, value=trip_salary).number_format = '#,##0'
+            
+            # Bảo hiểm XH
+            bao_hiem_xh = float(item.get("bao_hiem_xh", 0))
+            ws.cell(row=row_idx, column=6, value=bao_hiem_xh).number_format = '#,##0'
+            
+            # Rửa xe
+            rua_xe = float(item.get("rua_xe", 0))
+            ws.cell(row=row_idx, column=7, value=rua_xe).number_format = '#,##0'
+            
+            # Tiền trách nhiệm
+            tien_trach_nhiem = float(item.get("tien_trach_nhiem", 0))
+            ws.cell(row=row_idx, column=8, value=tien_trach_nhiem).number_format = '#,##0'
+            
+            # Ứng lương
+            ung_luong = float(item.get("ung_luong", 0))
+            ws.cell(row=row_idx, column=9, value=ung_luong).number_format = '#,##0'
+            
+            # Sửa xe
+            sua_xe = float(item.get("sua_xe", 0))
+            ws.cell(row=row_idx, column=10, value=sua_xe).number_format = '#,##0'
+            
+            # Còn lại (tính từ dữ liệu hoặc lấy trực tiếp)
+            con_lai = float(item.get("con_lai", 0))
+            if con_lai == 0:
+                # Tính lại nếu chưa có
+                con_lai = trip_salary - bao_hiem_xh - tien_trach_nhiem - ung_luong + rua_xe + sua_xe
+            ws.cell(row=row_idx, column=11, value=con_lai).number_format = '#,##0'
+            ws.cell(row=row_idx, column=11).font = Font(bold=True, color="1976d2")
+        
+        # Total row
+        totals = {
+            "working_days": sum(item.get("working_days", 0) for item in salary_data),
+            "total_trips": sum(item.get("total_trips", 0) for item in salary_data),
+            "trip_salary": sum(float(item.get("trip_salary", 0)) for item in salary_data),
+            "bao_hiem_xh": sum(float(item.get("bao_hiem_xh", 0)) for item in salary_data),
+            "rua_xe": sum(float(item.get("rua_xe", 0)) for item in salary_data),
+            "tien_trach_nhiem": sum(float(item.get("tien_trach_nhiem", 0)) for item in salary_data),
+            "ung_luong": sum(float(item.get("ung_luong", 0)) for item in salary_data),
+            "sua_xe": sum(float(item.get("sua_xe", 0)) for item in salary_data),
+            "con_lai": sum(float(item.get("con_lai", 0)) for item in salary_data)
+        }
+        
+        total_row = len(salary_data) + 4
+        ws.cell(row=total_row, column=1, value="TỔNG CỘNG").font = Font(bold=True)
+        ws.cell(row=total_row, column=2, value="").font = Font(bold=True)
+        ws.cell(row=total_row, column=3, value=totals["working_days"]).font = Font(bold=True)
+        ws.cell(row=total_row, column=4, value=totals["total_trips"]).font = Font(bold=True)
+        ws.cell(row=total_row, column=5, value=totals["trip_salary"]).number_format = '#,##0'
+        ws.cell(row=total_row, column=5).font = Font(bold=True)
+        ws.cell(row=total_row, column=6, value=totals["bao_hiem_xh"]).number_format = '#,##0'
+        ws.cell(row=total_row, column=6).font = Font(bold=True)
+        ws.cell(row=total_row, column=7, value=totals["rua_xe"]).number_format = '#,##0'
+        ws.cell(row=total_row, column=7).font = Font(bold=True)
+        ws.cell(row=total_row, column=8, value=totals["tien_trach_nhiem"]).number_format = '#,##0'
+        ws.cell(row=total_row, column=8).font = Font(bold=True)
+        ws.cell(row=total_row, column=9, value=totals["ung_luong"]).number_format = '#,##0'
+        ws.cell(row=total_row, column=9).font = Font(bold=True)
+        ws.cell(row=total_row, column=10, value=totals["sua_xe"]).number_format = '#,##0'
+        ws.cell(row=total_row, column=10).font = Font(bold=True)
+        ws.cell(row=total_row, column=11, value=totals["con_lai"]).number_format = '#,##0'
+        ws.cell(row=total_row, column=11).font = Font(bold=True, color="1976d2")
+        
+        # Set column widths
+        ws.column_dimensions['A'].width = 8
+        ws.column_dimensions['B'].width = 25
+        ws.column_dimensions['C'].width = 12
+        ws.column_dimensions['D'].width = 12
+        ws.column_dimensions['E'].width = 18
+        ws.column_dimensions['F'].width = 18
+        ws.column_dimensions['G'].width = 15
+        ws.column_dimensions['H'].width = 20
+        ws.column_dimensions['I'].width = 15
+        ws.column_dimensions['J'].width = 15
+        ws.column_dimensions['K'].width = 18
+        
+        # Save to BytesIO
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # Return file
+        filename = f"Bang_Luong_Tong_{month}.xlsx"
+        return Response(
+            content=output.read(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename*=UTF-8\'\'{quote(filename)}'
+            }
+        )
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({
+            "success": False,
+            "message": f"Lỗi khi xuất Excel: {str(e)}"
+        }, status_code=500)
+
 @app.get("/salary-calculation-v2", response_class=HTMLResponse)
 async def salary_calculation_v2_page(
     request: Request,
@@ -7182,7 +8437,7 @@ async def salary_calculation_v2_page(
         return redirect_response
     
     # Xác định tab hiện tại (mặc định là "driver" - tính lương lái xe)
-    current_tab = tab if tab in ["driver", "partner"] else "driver"
+    current_tab = tab if tab in ["driver", "partner", "summary"] else "driver"
     
     # Lấy danh sách lái xe từ TimekeepingDetail (chỉ cho tab driver)
     drivers_query = db.query(TimekeepingDetail.driver_name).distinct()
@@ -7215,6 +8470,7 @@ async def salary_calculation_v2_page(
     results = [] if has_search else None
     selected_driver = None
     selected_license_plate = None
+    total_driver_trip_salary = 0  # Khởi tạo tổng lương chuyến
     
     # Thực hiện tìm kiếm với giá trị mặc định hoặc giá trị được cung cấp
     if has_search and from_date and to_date:
@@ -7344,6 +8600,15 @@ async def salary_calculation_v2_page(
                     results_with_payment.append(result_dict)
                 
                 results = results_with_payment
+                
+                # Tính tổng lương chuyến cho tab driver (chỉ tính các chuyến không OFF)
+                if current_tab == "driver" and results:
+                    for item in results:
+                        result = item.get("result")
+                        trip_salary = item.get("trip_salary", 0)
+                        # Chỉ tính các chuyến có status không phải OFF
+                        if result and hasattr(result, 'status') and result.status not in ['OFF', 'Off']:
+                            total_driver_trip_salary += trip_salary
         except ValueError:
             # Nếu format ngày không đúng, bỏ qua
             pass
@@ -7359,7 +8624,8 @@ async def salary_calculation_v2_page(
         "results": results,
         "current_tab": current_tab,
         "partner_vehicles": partner_vehicle_plates,
-        "has_search": has_search
+        "has_search": has_search,
+        "total_driver_trip_salary": total_driver_trip_salary
     })
 
 @app.get("/salary-calculation-v2/export-excel")
@@ -10132,514 +11398,220 @@ async def statistics_finance_details(
 async def accounts_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user),
-    page: int = 1,
-    per_page: int = 20
+    current_user = Depends(get_current_user)
 ):
-    """Trang quản lý tài khoản - chỉ dành cho Admin"""
-    # Nếu chưa đăng nhập, redirect về login
-    if current_user is None:
-        return RedirectResponse(url="/login", status_code=303)
+    """(Removed) Trang Tài khoản đã được gỡ bỏ theo yêu cầu."""
+    return templates.TemplateResponse("blank.html", {"request": request, "current_user": current_user})
+
+# ==================== REMOVED: Account Management Routes ====================
+# Các routes sau đã bị xóa để đơn giản hóa module tài khoản:
+# - /accounts/add
+# - /accounts/update/{account_id}
+# - /accounts/reset-password/{account_id}
+# - /accounts/lock/{account_id}
+# - /accounts/unlock/{account_id}
+# - /accounts/delete/{account_id}
+# - /accounts/{account_id}/permissions
+# - /user-management
+# - /role-management
+# - /permission-management
+# - /api/users, /api/users/{user_id}/roles
+# - /api/roles, /api/roles/{role_id}
+# - /api/permissions, /api/roles/{role_id}/permissions
+# 
+# Chỉ giữ lại route /accounts để hiển thị danh sách tài khoản nội bộ (chỉ admin)
+
+# ==================== ADMINISTRATIVE MODULE - DOCUMENTS ====================
+
+@app.get("/administrative", response_class=HTMLResponse)
+async def administrative_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    document_type: Optional[str] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    tax_period_month: Optional[int] = None,
+    tax_period_year: Optional[int] = None,
+    current_user = Depends(get_current_user)
+):
+    """Trang quản lý tài liệu hành chính"""
+    # Check permission
+    if not check_permission(db, current_user["id"], "/administrative", "view"):
+        return RedirectResponse(url="/access-denied", status_code=303)
     
-    # Chỉ Admin mới được truy cập
-    if current_user["role"] != "Admin":
-        return RedirectResponse(url="/daily-new", status_code=303)
+    # Build query
+    query = db.query(Document)
     
-    # Query cơ bản - lấy tất cả accounts, sắp xếp theo created_at desc
-    query = db.query(Account).order_by(Account.created_at.desc())
+    # Filter by category
+    if category and category in ["legal", "administrative", "tax"]:
+        query = query.filter(Document.category == category)
     
-    # Phân trang
-    total = query.count()
-    accounts = query.offset((page - 1) * per_page).limit(per_page).all()
+    # Filter by document type
+    if document_type:
+        query = query.filter(Document.document_type == document_type)
     
-    # Tính toán phân trang
-    total_pages = (total + per_page - 1) // per_page
+    # Filter by status
+    if status and status in ["active", "expired", "archived"]:
+        query = query.filter(Document.status == status)
     
-    return templates.TemplateResponse("account.html", {
+    # Search by title (case-insensitive for SQLite)
+    if search:
+        query = query.filter(Document.title.like(f"%{search}%"))
+    
+    # Filter by date range (issued_date)
+    if date_from:
+        try:
+            date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
+            query = query.filter(Document.issued_date >= date_from_obj)
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
+            query = query.filter(Document.issued_date <= date_to_obj)
+        except ValueError:
+            pass
+    
+    # Filter by tax period (month/year) - for tax category documents
+    if tax_period_month and tax_period_year:
+        # Filter documents where issued_date matches the tax period
+        # Create start and end dates for the month
+        from calendar import monthrange
+        start_date = date(tax_period_year, tax_period_month, 1)
+        last_day = monthrange(tax_period_year, tax_period_month)[1]
+        end_date = date(tax_period_year, tax_period_month, last_day)
+        query = query.filter(
+            Document.issued_date >= start_date,
+            Document.issued_date <= end_date
+        )
+    
+    # Order by created_at desc
+    documents = query.order_by(Document.created_at.desc()).all()
+    
+    # Create a mapping of employee IDs to employee objects for quick lookup
+    employee_ids = [doc.related_entity_id for doc in documents if doc.related_entity_type == "employee" and doc.related_entity_id]
+    employees_dict = {}
+    if employee_ids:
+        employees_list = db.query(Employee).filter(Employee.id.in_(employee_ids)).all()
+        employees_dict = {emp.id: emp for emp in employees_list}
+    
+    # Attach employee info to documents
+    for doc in documents:
+        if doc.related_entity_type == "employee" and doc.related_entity_id:
+            doc.related_employee = employees_dict.get(doc.related_entity_id)
+    
+    # Get counts by category
+    legal_count = db.query(Document).filter(Document.category == "legal").count()
+    administrative_count = db.query(Document).filter(Document.category == "administrative").count()
+    tax_count = db.query(Document).filter(Document.category == "tax").count()
+    
+    # Get unique document types for filter dropdown
+    document_types = db.query(Document.document_type).distinct().order_by(Document.document_type).all()
+    document_types_list = [dt[0] for dt in document_types if dt[0]]
+    
+    # Get employees for dropdown (for administrative documents)
+    employees = db.query(Employee).filter(Employee.status == 1).order_by(Employee.name).all()
+    
+    return templates.TemplateResponse("administrative.html", {
         "request": request,
         "current_user": current_user,
-        "accounts": accounts,
-        "page": page,
-        "per_page": per_page,
-        "total": total,
-        "total_pages": total_pages
+        "documents": documents,
+        "category": category,
+        "status": status,
+        "document_type": document_type,
+        "search": search or "",
+        "date_from": date_from or "",
+        "date_to": date_to or "",
+        "tax_period_month": tax_period_month,
+        "tax_period_year": tax_period_year,
+        "legal_count": legal_count,
+        "administrative_count": administrative_count,
+        "tax_count": tax_count,
+        "document_types": document_types_list,
+        "employees": employees,
+        "today": date.today(),
+        "db": db  # Pass db for RBAC permission checks in templates
     })
 
-@app.post("/accounts/add")
-async def add_account(
+@app.get("/api/documents", response_class=JSONResponse)
+async def get_documents_api(
     request: Request,
-    username: str = Form(...),
-    password: Optional[str] = Form(None),
-    full_name: Optional[str] = Form(None),
-    email: Optional[str] = Form(None),
-    phone: Optional[str] = Form(None),
-    role: str = Form(...),
-    status: str = Form("Active"),
-    auto_generate_password: Optional[str] = Form(None),
     db: Session = Depends(get_db),
+    category: Optional[str] = None,
+    document_type: Optional[str] = None,
+    status: Optional[str] = None,
+    related_entity_type: Optional[str] = None,
+    related_entity_id: Optional[int] = None,
     current_user = Depends(get_current_user)
 ):
-    """Thêm tài khoản mới - chỉ Admin"""
-    if current_user is None or current_user["role"] != "Admin":
-        return JSONResponse({
-            "success": False,
-            "message": "Không có quyền thực hiện thao tác này"
-        }, status_code=403)
+    """API: Lấy danh sách documents"""
     
     try:
-        # Kiểm tra username đã tồn tại chưa
-        existing_account = db.query(Account).filter(Account.username == username).first()
-        if existing_account:
-            return JSONResponse({
-                "success": False,
-                "message": "Username đã tồn tại"
-            }, status_code=400)
+        query = db.query(Document)
         
-        # Xử lý mật khẩu
-        if auto_generate_password == "true":
-            final_password = generate_password()
-        else:
-            if not password:
-                return JSONResponse({
-                    "success": False,
-                    "message": "Vui lòng nhập mật khẩu hoặc chọn tự động tạo"
-                }, status_code=400)
-            
-            # Validate password
-            is_valid, error_message = validate_password(password)
-            if not is_valid:
-                return JSONResponse({
-                    "success": False,
-                    "message": error_message
-                }, status_code=400)
-            final_password = password
+        if category:
+            query = query.filter(Document.category == category)
+        if document_type:
+            query = query.filter(Document.document_type == document_type)
+        if status:
+            query = query.filter(Document.status == status)
+        if related_entity_type:
+            query = query.filter(Document.related_entity_type == related_entity_type)
+        if related_entity_id:
+            query = query.filter(Document.related_entity_id == related_entity_id)
         
-        # Validate role
-        if role not in ["Admin", "Manager", "User"]:
-            return JSONResponse({
-                "success": False,
-                "message": "Phân quyền không hợp lệ. Chỉ chấp nhận: Admin, Manager, User"
-            }, status_code=400)
+        documents = query.order_by(Document.created_at.desc()).all()
         
-        # Validate status
-        if status not in ["Active", "Inactive"]:
-            return JSONResponse({
-                "success": False,
-                "message": "Trạng thái không hợp lệ"
-            }, status_code=400)
+        result = []
+        for doc in documents:
+            result.append({
+                "id": doc.id,
+                "category": doc.category,
+                "document_type": doc.document_type,
+                "related_entity_type": doc.related_entity_type,
+                "related_entity_id": doc.related_entity_id,
+                "title": doc.title,
+                "file_path": doc.file_path,
+                "file_url": f"/{doc.file_path}",
+                "issued_date": doc.issued_date.isoformat() if doc.issued_date else None,
+                "expiry_date": doc.expiry_date.isoformat() if doc.expiry_date else None,
+                "status": doc.status,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None
+            })
         
-        # Tạo tài khoản mới
-        new_account = Account(
-            username=username,
-            password=final_password,
-            full_name=full_name,
-            email=email,
-            phone=phone,
-            role=role,
-            status=status
-        )
-        db.add(new_account)
-        db.commit()
-        db.refresh(new_account)
-        
-        # Ghi audit log
-        create_audit_log(
-            db=db,
-            user_id=current_user["id"],
-            action="create",
-            entity_type="account",
-            entity_id=new_account.id,
-            new_values={
-                "username": username,
-                "full_name": full_name,
-                "email": email,
-                "phone": phone,
-                "role": role,
-                "status": status
-            },
-            description=f"Tạo tài khoản mới: {username}",
-            ip_address=get_client_ip(request)
-        )
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã thêm tài khoản thành công",
-            "data": {
-                "id": new_account.id,
-                "username": username,
-                "password": final_password if auto_generate_password == "true" else None
-            }
-        })
-        
+        return JSONResponse({"success": True, "data": result})
     except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "message": f"Lỗi khi thêm tài khoản: {str(e)}"
-        }, status_code=500)
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
-@app.post("/accounts/update/{account_id}")
-async def update_account(
-    request: Request,
-    account_id: int,
-    full_name: Optional[str] = Form(None),
-    email: Optional[str] = Form(None),
-    phone: Optional[str] = Form(None),
-    role: Optional[str] = Form(None),
-    status: Optional[str] = Form(None),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Cập nhật thông tin tài khoản - chỉ Admin"""
-    if current_user is None or current_user["role"] != "Admin":
-        return JSONResponse({
-            "success": False,
-            "message": "Không có quyền thực hiện thao tác này"
-        }, status_code=403)
-    
-    try:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        
-        if not account:
-            return JSONResponse({
-                "success": False,
-                "message": "Không tìm thấy tài khoản"
-            }, status_code=404)
-        
-        # Không cho phép Admin tự xóa chính mình
-        if account_id == current_user["id"]:
-            return JSONResponse({
-                "success": False,
-                "message": "Không thể chỉnh sửa tài khoản của chính bạn"
-            }, status_code=400)
-        
-        # Lưu giá trị cũ để audit log
-        old_values = {
-            "full_name": account.full_name,
-            "email": account.email,
-            "phone": account.phone,
-            "role": account.role,
-            "status": account.status
-        }
-        
-        # Cập nhật thông tin
-        if full_name is not None:
-            account.full_name = full_name
-        if email is not None:
-            account.email = email
-        if phone is not None:
-            account.phone = phone
-        if role is not None:
-            if role not in ["Admin", "Manager", "User"]:
-                return JSONResponse({
-                    "success": False,
-                    "message": "Phân quyền không hợp lệ"
-                }, status_code=400)
-            account.role = role
-        if status is not None:
-            if status not in ["Active", "Inactive"]:
-                return JSONResponse({
-                    "success": False,
-                    "message": "Trạng thái không hợp lệ"
-                }, status_code=400)
-            account.status = status
-        
-        account.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(account)
-        
-        # Ghi audit log
-        new_values = {
-            "full_name": account.full_name,
-            "email": account.email,
-            "phone": account.phone,
-            "role": account.role,
-            "status": account.status
-        }
-        create_audit_log(
-            db=db,
-            user_id=current_user["id"],
-            action="update",
-            entity_type="account",
-            entity_id=account_id,
-            old_values=old_values,
-            new_values=new_values,
-            description=f"Cập nhật thông tin tài khoản: {account.username}",
-            ip_address=get_client_ip(request)
-        )
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã cập nhật tài khoản thành công"
-        })
-        
-    except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "message": f"Lỗi khi cập nhật tài khoản: {str(e)}"
-        }, status_code=500)
+# Removed all account management routes - see comment at line 10665
+# Removed all RBAC routes - see comment at line 10665
+# Removed all permission management routes - see comment at line 10665
+
+# (cleanup) Removed leftover orphaned code block (was part of old /accounts/update route)
 
 @app.post("/accounts/reset-password/{account_id}")
-async def reset_password(
-    request: Request,
-    account_id: int,
-    new_password: Optional[str] = Form(None),
-    auto_generate: Optional[str] = Form("false"),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Reset mật khẩu - Admin reset cho user khác, User đổi mật khẩu của chính mình"""
-    if current_user is None:
-        return JSONResponse({
-            "success": False,
-            "message": "Chưa đăng nhập"
-        }, status_code=401)
-    
-    try:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        
-        if not account:
-            return JSONResponse({
-                "success": False,
-                "message": "Không tìm thấy tài khoản"
-            }, status_code=404)
-        
-        # User chỉ được đổi mật khẩu của chính mình
-        if current_user["role"] != "Admin" and account_id != current_user["id"]:
-            return JSONResponse({
-                "success": False,
-                "message": "Bạn chỉ có thể đổi mật khẩu của chính mình"
-            }, status_code=403)
-        
-        # Xử lý mật khẩu
-        if auto_generate == "true":
-            final_password = generate_password()
-        else:
-            if not new_password:
-                return JSONResponse({
-                    "success": False,
-                    "message": "Vui lòng nhập mật khẩu mới hoặc chọn tự động tạo"
-                }, status_code=400)
-            
-            # Validate password
-            is_valid, error_message = validate_password(new_password)
-            if not is_valid:
-                return JSONResponse({
-                    "success": False,
-                    "message": error_message
-                }, status_code=400)
-            final_password = new_password
-        
-        # Cập nhật mật khẩu
-        account.password = final_password
-        account.updated_at = datetime.utcnow()
-        db.commit()
-        
-        # Ghi audit log
-        action_desc = "reset_password" if current_user["role"] == "Admin" and account_id != current_user["id"] else "change_password"
-        create_audit_log(
-            db=db,
-            user_id=current_user["id"],
-            action=action_desc,
-            entity_type="account",
-            entity_id=account_id,
-            description=f"{'Reset' if action_desc == 'reset_password' else 'Đổi'} mật khẩu cho tài khoản: {account.username}",
-            ip_address=get_client_ip(request)
-        )
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã đổi mật khẩu thành công",
-            "data": {
-                "password": final_password if auto_generate == "true" else None
-            }
-        })
-        
-    except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "message": f"Lỗi khi đổi mật khẩu: {str(e)}"
-        }, status_code=500)
+async def reset_password(*args, **kwargs):
+    """(Removed)"""
+    return JSONResponse({"success": False, "message": "Removed"}, status_code=404)
 
 @app.post("/accounts/lock/{account_id}")
-async def lock_account(
-    request: Request,
-    account_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Khoá tài khoản - chỉ Admin"""
-    if current_user is None or current_user["role"] != "Admin":
-        return JSONResponse({
-            "success": False,
-            "message": "Không có quyền thực hiện thao tác này"
-        }, status_code=403)
-    
-    try:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        
-        if not account:
-            return JSONResponse({
-                "success": False,
-                "message": "Không tìm thấy tài khoản"
-            }, status_code=404)
-        
-        # Không cho phép Admin tự khoá chính mình
-        if account_id == current_user["id"]:
-            return JSONResponse({
-                "success": False,
-                "message": "Không thể khoá tài khoản của chính bạn"
-            }, status_code=400)
-        
-        # Khoá tài khoản
-        account.is_locked = 1
-        account.locked_at = datetime.utcnow()
-        account.locked_by = current_user["id"]
-        account.updated_at = datetime.utcnow()
-        db.commit()
-        
-        # Ghi audit log
-        create_audit_log(
-            db=db,
-            user_id=current_user["id"],
-            action="lock",
-            entity_type="account",
-            entity_id=account_id,
-            old_values={"is_locked": 0},
-            new_values={"is_locked": 1},
-            description=f"Khoá tài khoản: {account.username}",
-            ip_address=get_client_ip(request)
-        )
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã khoá tài khoản thành công"
-        })
-        
-    except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "message": f"Lỗi khi khoá tài khoản: {str(e)}"
-        }, status_code=500)
+async def lock_account(*args, **kwargs):
+    """(Removed)"""
+    return JSONResponse({"success": False, "message": "Removed"}, status_code=404)
 
 @app.post("/accounts/unlock/{account_id}")
-async def unlock_account(
-    request: Request,
-    account_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Mở khoá tài khoản - chỉ Admin"""
-    if current_user is None or current_user["role"] != "Admin":
-        return JSONResponse({
-            "success": False,
-            "message": "Không có quyền thực hiện thao tác này"
-        }, status_code=403)
-    
-    try:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        
-        if not account:
-            return JSONResponse({
-                "success": False,
-                "message": "Không tìm thấy tài khoản"
-            }, status_code=404)
-        
-        # Mở khoá tài khoản
-        account.is_locked = 0
-        account.locked_at = None
-        account.locked_by = None
-        account.updated_at = datetime.utcnow()
-        db.commit()
-        
-        # Ghi audit log
-        create_audit_log(
-            db=db,
-            user_id=current_user["id"],
-            action="unlock",
-            entity_type="account",
-            entity_id=account_id,
-            old_values={"is_locked": 1},
-            new_values={"is_locked": 0},
-            description=f"Mở khoá tài khoản: {account.username}",
-            ip_address=get_client_ip(request)
-        )
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã mở khoá tài khoản thành công"
-        })
-        
-    except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "message": f"Lỗi khi mở khoá tài khoản: {str(e)}"
-        }, status_code=500)
+async def unlock_account(*args, **kwargs):
+    """(Removed)"""
+    return JSONResponse({"success": False, "message": "Removed"}, status_code=404)
 
 @app.post("/accounts/delete/{account_id}")
-async def delete_account(
-    request: Request,
-    account_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Xóa tài khoản (soft delete) - chỉ Admin"""
-    if current_user is None or current_user["role"] != "Admin":
-        return JSONResponse({
-            "success": False,
-            "message": "Không có quyền thực hiện thao tác này"
-        }, status_code=403)
-    
-    try:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        
-        if not account:
-            return JSONResponse({
-                "success": False,
-                "message": "Không tìm thấy tài khoản"
-            }, status_code=404)
-        
-        # Không cho phép Admin tự xóa chính mình
-        if account_id == current_user["id"]:
-            return JSONResponse({
-                "success": False,
-                "message": "Không thể xóa tài khoản của chính bạn"
-            }, status_code=400)
-        
-        # Soft delete - đánh dấu là Inactive
-        old_status = account.status
-        account.status = "Inactive"
-        account.updated_at = datetime.utcnow()
-        db.commit()
-        
-        # Ghi audit log
-        create_audit_log(
-            db=db,
-            user_id=current_user["id"],
-            action="delete",
-            entity_type="account",
-            entity_id=account_id,
-            old_values={"status": old_status},
-            new_values={"status": "Inactive"},
-            description=f"Xóa (vô hiệu hóa) tài khoản: {account.username}",
-            ip_address=get_client_ip(request)
-        )
-        
-        return JSONResponse({
-            "success": True,
-            "message": "Đã xóa tài khoản thành công"
-        })
-        
-    except Exception as e:
-        db.rollback()
-        return JSONResponse({
-            "success": False,
-            "message": f"Lỗi khi xóa tài khoản: {str(e)}"
-        }, status_code=500)
+async def delete_account(*args, **kwargs):
+    """(Removed)"""
+    return JSONResponse({"success": False, "message": "Removed"}, status_code=404)
 
 # ==================== PERMISSION MANAGEMENT ROUTES ====================
 
@@ -10717,106 +11689,1312 @@ async def get_user_permissions(
         }, status_code=500)
 
 @app.post("/accounts/{account_id}/permissions")
-async def update_user_permissions(
-    account_id: int,
+async def update_user_permissions(*args, **kwargs):
+    """(Removed)"""
+    return JSONResponse({"success": False, "message": "Removed"}, status_code=404)
+
+# ==================== RBAC ROUTES ====================
+
+@app.get("/api/users", response_class=JSONResponse)
+async def get_users_api(
+    db: Session = Depends(get_db)
+):
+    """API: Lấy danh sách users với roles"""
+    try:
+        users = db.query(Account).all()
+        result = []
+        for user in users:
+            user_roles = db.query(UserRole).filter(UserRole.user_id == user.id).all()
+            roles = [{"id": ur.role_id, "name": ur.role.name} for ur in user_roles]
+            result.append({
+                "id": user.id,
+                "username": user.username,
+                "full_name": user.full_name,
+                "email": user.email,
+                "phone": user.phone,
+                "status": user.status,
+                "is_locked": user.is_locked,
+                "roles": roles,
+                "created_at": user.created_at.isoformat() if user.created_at else None
+            })
+        return JSONResponse({"success": True, "data": result})
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.post("/api/users/{user_id}/roles")
+async def assign_user_roles(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """API: Gán roles cho user"""
+    try:
+        account = db.query(Account).filter(Account.id == user_id).first()
+        if not account:
+            return JSONResponse({"success": False, "message": "User not found"}, status_code=404)
+        
+        body = await request.json()
+        role_ids = body.get("role_ids", [])
+        
+        if not isinstance(role_ids, list):
+            return JSONResponse({"success": False, "message": "role_ids must be a list"}, status_code=400)
+        
+        # Delete existing roles
+        db.query(UserRole).filter(UserRole.user_id == user_id).delete()
+        
+        # Add new roles
+        for role_id in role_ids:
+            role = db.query(Role).filter(Role.id == role_id).first()
+            if role:
+                user_role = UserRole(
+                    user_id=user_id,
+                    role_id=role_id,
+                    assigned_by=0
+                )
+                db.add(user_role)
+        
+        db.commit()
+        
+        # Audit log
+        create_audit_log(
+            db=db,
+            user_id=0,
+            action="update",
+            entity_type="user_roles",
+            entity_id=user_id,
+            new_values={"role_ids": role_ids},
+            description=f"Updated roles for user: {account.username}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({"success": True, "message": "Roles assigned successfully"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.get("/api/roles", response_class=JSONResponse)
+async def get_roles_api(
+    db: Session = Depends(get_db)
+):
+    """API: Lấy danh sách roles"""
+    try:
+        roles = db.query(Role).all()
+        result = [{
+            "id": r.id,
+            "name": r.name,
+            "description": r.description,
+            "is_system_role": bool(r.is_system_role),
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        } for r in roles]
+        return JSONResponse({"success": True, "data": result})
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.post("/api/roles")
+async def create_role(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """API: Tạo role mới"""
+    try:
+        body = await request.json()
+        name = body.get("name")
+        description = body.get("description", "")
+        
+        if not name:
+            return JSONResponse({"success": False, "message": "Role name is required"}, status_code=400)
+        
+        # Check if role exists
+        existing = db.query(Role).filter(Role.name == name).first()
+        if existing:
+            return JSONResponse({"success": False, "message": "Role already exists"}, status_code=400)
+        
+        role = Role(name=name, description=description, is_system_role=0)
+        db.add(role)
+        db.commit()
+        
+        # Audit log
+        create_audit_log(
+            db=db,
+            user_id=0,
+            action="create",
+            entity_type="role",
+            entity_id=role.id,
+            new_values={"name": name, "description": description},
+            description=f"Created role: {name}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({"success": True, "data": {"id": role.id, "name": role.name}})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.put("/api/roles/{role_id}")
+async def update_role(
+    role_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """API: Cập nhật role"""
+    try:
+        role = db.query(Role).filter(Role.id == role_id).first()
+        if not role:
+            return JSONResponse({"success": False, "message": "Role not found"}, status_code=404)
+        
+        if role.is_system_role:
+            return JSONResponse({"success": False, "message": "Cannot modify system role"}, status_code=400)
+        
+        body = await request.json()
+        old_values = {"name": role.name, "description": role.description}
+        
+        if "name" in body:
+            # Check if new name conflicts
+            existing = db.query(Role).filter(Role.name == body["name"], Role.id != role_id).first()
+            if existing:
+                return JSONResponse({"success": False, "message": "Role name already exists"}, status_code=400)
+            role.name = body["name"]
+        
+        if "description" in body:
+            role.description = body["description"]
+        
+        role.updated_at = datetime.utcnow()
+        db.commit()
+        
+        # Audit log
+        create_audit_log(
+            db=db,
+            user_id=0,
+            action="update",
+            entity_type="role",
+            entity_id=role_id,
+            old_values=old_values,
+            new_values={"name": role.name, "description": role.description},
+            description=f"Updated role: {role.name}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({"success": True, "message": "Role updated successfully"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.delete("/api/roles/{role_id}")
+async def delete_role(
+    role_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """API: Xóa role"""
+    try:
+        role = db.query(Role).filter(Role.id == role_id).first()
+        if not role:
+            return JSONResponse({"success": False, "message": "Role not found"}, status_code=404)
+        
+        if role.is_system_role:
+            return JSONResponse({"success": False, "message": "Cannot delete system role"}, status_code=400)
+        
+        role_name = role.name
+        db.delete(role)
+        db.commit()
+        
+        # Audit log
+        create_audit_log(
+            db=db,
+            user_id=0,
+            action="delete",
+            entity_type="role",
+            entity_id=role_id,
+            old_values={"name": role_name},
+            description=f"Deleted role: {role_name}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({"success": True, "message": "Role deleted successfully"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.get("/api/permissions", response_class=JSONResponse)
+async def get_permissions_api(
+    db: Session = Depends(get_db)
+):
+    """API: Lấy danh sách permissions, nhóm theo page"""
+    try:
+        permissions = db.query(Permission).order_by(Permission.page_path, Permission.action).all()
+        
+        # Group by page_path
+        pages = {}
+        for perm in permissions:
+            if perm.page_path not in pages:
+                pages[perm.page_path] = []
+            pages[perm.page_path].append({
+                "id": perm.id,
+                "name": perm.name,
+                "description": perm.description,
+                "action": perm.action
+            })
+        
+        result = [{"page_path": path, "permissions": perms} for path, perms in pages.items()]
+        return JSONResponse({"success": True, "data": result})
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.get("/api/roles/{role_id}/permissions", response_class=JSONResponse)
+async def get_role_permissions(
+    role_id: int,
+    db: Session = Depends(get_db)
+):
+    """API: Lấy permissions của role"""
+    try:
+        role = db.query(Role).filter(Role.id == role_id).first()
+        if not role:
+            return JSONResponse({"success": False, "message": "Role not found"}, status_code=404)
+        
+        role_permissions = db.query(RolePermission).filter(RolePermission.role_id == role_id).all()
+        permission_ids = [rp.permission_id for rp in role_permissions]
+        
+        return JSONResponse({"success": True, "data": {"permission_ids": permission_ids}})
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.post("/api/roles/{role_id}/permissions")
+async def update_role_permissions(
+    role_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """API: Cập nhật permissions của role"""
+    try:
+        role = db.query(Role).filter(Role.id == role_id).first()
+        if not role:
+            return JSONResponse({"success": False, "message": "Role not found"}, status_code=404)
+        
+        body = await request.json()
+        permission_ids = body.get("permission_ids", [])
+        
+        if not isinstance(permission_ids, list):
+            return JSONResponse({"success": False, "message": "permission_ids must be a list"}, status_code=400)
+        
+        # Delete existing permissions
+        db.query(RolePermission).filter(RolePermission.role_id == role_id).delete()
+        
+        # Add new permissions
+        for perm_id in permission_ids:
+            permission = db.query(Permission).filter(Permission.id == perm_id).first()
+            if permission:
+                role_permission = RolePermission(role_id=role_id, permission_id=perm_id)
+                db.add(role_permission)
+        
+        db.commit()
+        
+        # Audit log
+        create_audit_log(
+            db=db,
+            user_id=0,
+            action="update",
+            entity_type="role_permissions",
+            entity_id=role_id,
+            new_values={"permission_ids": permission_ids},
+            description=f"Updated permissions for role: {role.name}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({"success": True, "message": "Role permissions updated successfully"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+# ==================== ADMINISTRATIVE MODULE - DOCUMENTS ====================
+
+@app.get("/administrative", response_class=HTMLResponse)
+async def administrative_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    document_type: Optional[str] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    tax_period_month: Optional[int] = None,
+    tax_period_year: Optional[int] = None,
+    current_user = Depends(get_current_user)
+):
+    """Trang quản lý tài liệu hành chính"""
+    
+    # Build query
+    query = db.query(Document)
+    
+    # Filter by category
+    if category and category in ["legal", "administrative", "tax"]:
+        query = query.filter(Document.category == category)
+    
+    # Filter by document type
+    if document_type:
+        query = query.filter(Document.document_type == document_type)
+    
+    # Filter by status
+    if status and status in ["active", "expired", "archived"]:
+        query = query.filter(Document.status == status)
+    
+    # Search by title (case-insensitive for SQLite)
+    if search:
+        query = query.filter(Document.title.like(f"%{search}%"))
+    
+    # Filter by date range (issued_date)
+    if date_from:
+        try:
+            date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
+            query = query.filter(Document.issued_date >= date_from_obj)
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
+            query = query.filter(Document.issued_date <= date_to_obj)
+        except ValueError:
+            pass
+    
+    # Filter by tax period (month/year) - for tax category documents
+    if tax_period_month and tax_period_year:
+        # Filter documents where issued_date matches the tax period
+        # Create start and end dates for the month
+        from calendar import monthrange
+        start_date = date(tax_period_year, tax_period_month, 1)
+        last_day = monthrange(tax_period_year, tax_period_month)[1]
+        end_date = date(tax_period_year, tax_period_month, last_day)
+        query = query.filter(
+            Document.issued_date >= start_date,
+            Document.issued_date <= end_date
+        )
+    
+    # Order by created_at desc
+    documents = query.order_by(Document.created_at.desc()).all()
+    
+    # Create a mapping of employee IDs to employee objects for quick lookup
+    employee_ids = [doc.related_entity_id for doc in documents if doc.related_entity_type == "employee" and doc.related_entity_id]
+    employees_dict = {}
+    if employee_ids:
+        employees_list = db.query(Employee).filter(Employee.id.in_(employee_ids)).all()
+        employees_dict = {emp.id: emp for emp in employees_list}
+    
+    # Attach employee info to documents
+    for doc in documents:
+        if doc.related_entity_type == "employee" and doc.related_entity_id:
+            doc.related_employee = employees_dict.get(doc.related_entity_id)
+    
+    # Get counts by category
+    legal_count = db.query(Document).filter(Document.category == "legal").count()
+    administrative_count = db.query(Document).filter(Document.category == "administrative").count()
+    tax_count = db.query(Document).filter(Document.category == "tax").count()
+    
+    # Get unique document types for filter dropdown
+    document_types = db.query(Document.document_type).distinct().order_by(Document.document_type).all()
+    document_types_list = [dt[0] for dt in document_types if dt[0]]
+    
+    # Get employees for dropdown (for administrative documents)
+    employees = db.query(Employee).filter(Employee.status == 1).order_by(Employee.name).all()
+    
+    return templates.TemplateResponse("administrative.html", {
+        "request": request,
+        "current_user": current_user,
+        "documents": documents,
+        "category": category,
+        "status": status,
+        "document_type": document_type,
+        "search": search or "",
+        "date_from": date_from or "",
+        "date_to": date_to or "",
+        "tax_period_month": tax_period_month,
+        "tax_period_year": tax_period_year,
+        "legal_count": legal_count,
+        "administrative_count": administrative_count,
+        "tax_count": tax_count,
+        "document_types": document_types_list,
+        "employees": employees,
+        "today": date.today(),
+        "db": db  # Pass db for RBAC permission checks in templates
+    })
+
+@app.get("/api/documents", response_class=JSONResponse)
+async def get_documents_api(
+    request: Request,
+    db: Session = Depends(get_db),
+    category: Optional[str] = None,
+    document_type: Optional[str] = None,
+    status: Optional[str] = None,
+    related_entity_type: Optional[str] = None,
+    related_entity_id: Optional[int] = None,
+    current_user = Depends(get_current_user)
+):
+    """API: Lấy danh sách documents"""
+    
+    try:
+        query = db.query(Document)
+        
+        if category:
+            query = query.filter(Document.category == category)
+        if document_type:
+            query = query.filter(Document.document_type == document_type)
+        if status:
+            query = query.filter(Document.status == status)
+        if related_entity_type:
+            query = query.filter(Document.related_entity_type == related_entity_type)
+        if related_entity_id:
+            query = query.filter(Document.related_entity_id == related_entity_id)
+        
+        documents = query.order_by(Document.created_at.desc()).all()
+        
+        result = []
+        for doc in documents:
+            result.append({
+                "id": doc.id,
+                "category": doc.category,
+                "document_type": doc.document_type,
+                "related_entity_type": doc.related_entity_type,
+                "related_entity_id": doc.related_entity_id,
+                "title": doc.title,
+                "file_path": doc.file_path,
+                "file_url": f"/{doc.file_path}",
+                "issued_date": doc.issued_date.isoformat() if doc.issued_date else None,
+                "expiry_date": doc.expiry_date.isoformat() if doc.expiry_date else None,
+                "status": doc.status,
+                "description": doc.description,
+                "notes": doc.notes,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                "created_by": doc.created_by,
+                "creator_name": doc.creator.username if doc.creator else None
+            })
+        
+        return JSONResponse({"success": True, "data": result})
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.get("/api/documents/{document_id}", response_class=JSONResponse)
+async def get_document_api(
+    document_id: int,
     request: Request,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    """Cập nhật permissions của user - chỉ Admin"""
-    if current_user is None or current_user["role"] != "Admin":
-        return JSONResponse({
-            "success": False,
-            "message": "Không có quyền thực hiện thao tác này"
-        }, status_code=403)
+    """API: Lấy thông tin một document"""
+    if not check_permission(db, current_user["id"], "/administrative", "view"):
+        return JSONResponse({"success": False, "message": "Insufficient permissions"}, status_code=403)
     
     try:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        if not account:
-            return JSONResponse({
-                "success": False,
-                "message": "Không tìm thấy tài khoản"
-            }, status_code=404)
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            return JSONResponse({"success": False, "message": "Document not found"}, status_code=404)
         
-        # Admin không thể thay đổi permissions
-        if account.role == "Admin":
-            return JSONResponse({
-                "success": False,
-                "message": "Không thể thay đổi permissions của Admin"
-            }, status_code=400)
+        return JSONResponse({
+            "success": True,
+            "data": {
+                "id": doc.id,
+                "category": doc.category,
+                "document_type": doc.document_type,
+                "related_entity_type": doc.related_entity_type,
+                "related_entity_id": doc.related_entity_id,
+                "title": doc.title,
+                "file_path": doc.file_path,
+                "file_url": f"/{doc.file_path}",
+                "issued_date": doc.issued_date.isoformat() if doc.issued_date else None,
+                "expiry_date": doc.expiry_date.isoformat() if doc.expiry_date else None,
+                "status": doc.status,
+                "description": doc.description,
+                "notes": doc.notes,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                "created_by": doc.created_by,
+                "creator_name": doc.creator.username if doc.creator else None
+            }
+        })
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.post("/api/documents")
+async def create_document(
+    request: Request,
+    db: Session = Depends(get_db),
+    category: str = Form(...),
+    document_type: str = Form(...),
+    title: str = Form(...),
+    file: UploadFile = File(...),
+    related_entity_type: Optional[str] = Form(None),
+    related_entity_id: Optional[int] = Form(None),
+    issued_date: Optional[str] = Form(None),
+    expiry_date: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    current_user = Depends(get_current_user)
+):
+    """API: Tạo document mới"""
+    
+    try:
+        # Validate category
+        if category not in ["legal", "administrative", "tax"]:
+            return JSONResponse({"success": False, "message": "Invalid category"}, status_code=400)
         
-        # Lấy dữ liệu từ request
-        try:
-            body = await request.json()
-        except Exception as e:
-            return JSONResponse({
-                "success": False,
-                "message": f"Lỗi khi parse request body: {str(e)}"
-            }, status_code=400)
+        # Validate file type
+        is_valid, error_msg = validate_document_file(file.filename)
+        if not is_valid:
+            return JSONResponse({"success": False, "message": error_msg}, status_code=400)
         
-        permission_ids = body.get("permission_ids", [])
+        # Validate file size (10MB limit)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        file_content = await file.read()
+        file_size = len(file_content)
+        if file_size > MAX_FILE_SIZE:
+            return JSONResponse({"success": False, "message": f"File size exceeds 10MB limit. File size: {(file_size / 1024 / 1024):.2f}MB"}, status_code=400)
         
-        # Đảm bảo permission_ids là list of integers
-        if not isinstance(permission_ids, list):
-            return JSONResponse({
-                "success": False,
-                "message": "permission_ids phải là một mảng"
-            }, status_code=400)
+        # Reset file pointer for saving
+        await file.seek(0)
         
-        # Convert tất cả về integer
-        try:
-            permission_ids = [int(pid) for pid in permission_ids if pid is not None]
-        except (ValueError, TypeError) as e:
-            return JSONResponse({
-                "success": False,
-                "message": f"Lỗi khi convert permission_ids: {str(e)}"
-            }, status_code=400)
+        # Ensure directories exist
+        ensure_document_dirs()
         
-        # Xóa tất cả permissions cũ của user này
-        deleted_count = db.query(UserPermission).filter(UserPermission.user_id == account_id).delete()
+        # Determine folder based on category and document type
+        folder = get_document_category_folder(category, document_type)
+        category_dir = os.path.join(DOCUMENTS_UPLOAD_DIR, folder)
+        ensure_directory_exists(category_dir)
         
-        # Thêm permissions mới (không cần kiểm tra existing vì đã xóa hết rồi)
-        added_count = 0
-        for perm_id in permission_ids:
-            # Kiểm tra permission có tồn tại trong hệ thống không
-            permission = db.query(Permission).filter(Permission.id == perm_id).first()
-            if permission:
-                user_permission = UserPermission(
-                    user_id=account_id,
-                    permission_id=perm_id
-                )
-                db.add(user_permission)
-                added_count += 1
+        # Generate unique filename while preserving original name
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        file_ext = os.path.splitext(file.filename)[1]
+        # Sanitize original filename
+        original_name = os.path.splitext(file.filename)[0]
+        # Remove/replace unsafe characters
+        safe_original_name = re.sub(r'[^\w\s-]', '', original_name).strip()
+        safe_original_name = re.sub(r'[-\s]+', '-', safe_original_name)
+        safe_filename = f"{safe_original_name}_{timestamp}{file_ext}"
+        file_path = os.path.join(category_dir, safe_filename)
         
+        # Save file (reuse content already read for size validation)
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_content)
+        
+        # Relative path for database
+        relative_path = file_path.replace("\\", "/")
+        
+        # Parse dates
+        issued_date_obj = None
+        if issued_date:
+            try:
+                issued_date_obj = datetime.strptime(issued_date, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        
+        expiry_date_obj = None
+        if expiry_date:
+            try:
+                expiry_date_obj = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        
+        # Determine status based on expiry date
+        status = "active"
+        if expiry_date_obj and expiry_date_obj < date.today():
+            status = "expired"
+        
+        # Create document
+        document = Document(
+            category=category,
+            document_type=document_type,
+            related_entity_type=related_entity_type if related_entity_type else None,
+            related_entity_id=related_entity_id if related_entity_id else None,
+            title=title,
+            file_path=relative_path,
+            issued_date=issued_date_obj,
+            expiry_date=expiry_date_obj,
+            status=status,
+            description=description,
+            notes=notes,
+            created_by=current_user["id"],
+            updated_by=current_user["id"]
+        )
+        
+        db.add(document)
         db.commit()
         
-        # Ghi audit log
+        # Audit log
         create_audit_log(
             db=db,
             user_id=current_user["id"],
-            action="update",
-            entity_type="user_permissions",
-            entity_id=account_id,
-            new_values={"permission_ids": permission_ids},
-            description=f"Cập nhật permissions cho user: {account.username}",
+            action="create",
+            entity_type="document",
+            entity_id=document.id,
+            new_values={"title": title, "category": category, "document_type": document_type},
+            description=f"Created document: {title}",
             ip_address=get_client_ip(request)
         )
         
         return JSONResponse({
             "success": True,
-            "message": "Đã cập nhật permissions thành công"
+            "message": "Document created successfully",
+            "data": {"id": document.id}
         })
-        
     except Exception as e:
         db.rollback()
-        return JSONResponse({
-            "success": False,
-            "message": f"Lỗi khi cập nhật permissions: {str(e)}"
-        }, status_code=500)
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.put("/api/documents/{document_id}")
+async def update_document(
+    document_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    category: Optional[str] = Form(None),
+    document_type: Optional[str] = Form(None),
+    title: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    related_entity_type: Optional[str] = Form(None),
+    related_entity_id: Optional[int] = Form(None),
+    issued_date: Optional[str] = Form(None),
+    expiry_date: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    current_user = Depends(get_current_user)
+):
+    """API: Cập nhật document"""
+    
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            return JSONResponse({"success": False, "message": "Document not found"}, status_code=404)
+        
+        old_values = {
+            "category": document.category,
+            "document_type": document.document_type,
+            "title": document.title,
+            "status": document.status
+        }
+        
+        # Update fields
+        if category and category in ["legal", "administrative", "tax"]:
+            document.category = category
+        if document_type:
+            document.document_type = document_type
+        if title:
+            document.title = title
+        if related_entity_type is not None:
+            document.related_entity_type = related_entity_type if related_entity_type else None
+        if related_entity_id is not None:
+            document.related_entity_id = related_entity_id if related_entity_id else None
+        if description is not None:
+            document.description = description
+        if notes is not None:
+            document.notes = notes
+        if status and status in ["active", "expired", "archived"]:
+            document.status = status
+        
+        # Parse dates
+        if issued_date:
+            try:
+                document.issued_date = datetime.strptime(issued_date, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        
+        if expiry_date:
+            try:
+                document.expiry_date = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        
+        # Update file if provided (check both file object and filename to ensure a real file was uploaded)
+        if file and file.filename:
+            # Validate file type
+            is_valid, error_msg = validate_document_file(file.filename)
+            if not is_valid:
+                return JSONResponse({"success": False, "message": error_msg}, status_code=400)
+            
+            # Validate file size (10MB limit)
+            MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+            file_content = await file.read()
+            file_size = len(file_content)
+            if file_size > MAX_FILE_SIZE:
+                return JSONResponse({"success": False, "message": f"File size exceeds 10MB limit. File size: {(file_size / 1024 / 1024):.2f}MB"}, status_code=400)
+            
+            # Delete old file
+            if document.file_path and os.path.exists(document.file_path):
+                try:
+                    os.remove(document.file_path)
+                except Exception:
+                    pass
+            
+            # Save new file
+            folder = get_document_category_folder(document.category, document.document_type)
+            category_dir = os.path.join(DOCUMENTS_UPLOAD_DIR, folder)
+            ensure_directory_exists(category_dir)
+            
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            file_ext = os.path.splitext(file.filename)[1]
+            # Preserve original filename
+            original_name = os.path.splitext(file.filename)[0]
+            safe_original_name = re.sub(r'[^\w\s-]', '', original_name).strip()
+            safe_original_name = re.sub(r'[-\s]+', '-', safe_original_name)
+            safe_filename = f"{safe_original_name}_{timestamp}{file_ext}"
+            file_path = os.path.join(category_dir, safe_filename)
+            
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+            
+            document.file_path = file_path.replace("\\", "/")
+        
+        # Update status based on expiry date
+        if document.expiry_date and document.expiry_date < date.today():
+            document.status = "expired"
+        
+        document.updated_by = current_user["id"]
+        document.updated_at = datetime.utcnow()
+        
+        db.commit()
+        
+        # Audit log
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="update",
+            entity_type="document",
+            entity_id=document_id,
+            old_values=old_values,
+            new_values={
+                "category": document.category,
+                "document_type": document.document_type,
+                "title": document.title,
+                "status": document.status
+            },
+            description=f"Updated document: {document.title}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({"success": True, "message": "Document updated successfully"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+@app.delete("/api/documents/{document_id}")
+async def delete_document(
+    document_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """API: Xóa document"""
+    
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            return JSONResponse({"success": False, "message": "Document not found"}, status_code=404)
+        
+        # Delete file
+        if document.file_path and os.path.exists(document.file_path):
+            try:
+                os.remove(document.file_path)
+            except Exception as e:
+                print(f"Error deleting file: {e}")
+        
+        title = document.title
+        db.delete(document)
+        db.commit()
+        
+        # Audit log
+        create_audit_log(
+            db=db,
+            user_id=current_user["id"],
+            action="delete",
+            entity_type="document",
+            entity_id=document_id,
+            old_values={"title": title},
+            description=f"Deleted document: {title}",
+            ip_address=get_client_ip(request)
+        )
+        
+        return JSONResponse({"success": True, "message": "Document deleted successfully"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+# Document view/download/print routes
+@app.get("/documents/view/{document_id}", response_class=HTMLResponse)
+async def view_document(
+    document_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """View document in browser"""
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            return HTMLResponse("<h1>Document not found</h1>", status_code=404)
+        
+        if not os.path.exists(document.file_path):
+            return HTMLResponse("<h1>File not found on server</h1>", status_code=404)
+        
+        file_ext = os.path.splitext(document.file_path)[1].lower()
+        
+        # For images, display inline with HTML page
+        if file_ext in [".jpg", ".jpeg", ".png"]:
+            # Get the file URL - need to serve it via a route
+            file_url = f"/documents/file/{document_id}"
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>{document.title}</title>
+                <meta charset="UTF-8">
+                <style>
+                    * {{
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }}
+                    body {{
+                        font-family: Arial, sans-serif;
+                        background: #f5f5f5;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        background: white;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                        overflow: hidden;
+                    }}
+                    .header {{
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        padding: 20px;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    }}
+                    .header h1 {{
+                        font-size: 24px;
+                        font-weight: 600;
+                    }}
+                    .controls {{
+                        display: flex;
+                        gap: 10px;
+                    }}
+                    .btn {{
+                        padding: 10px 20px;
+                        background: rgba(255,255,255,0.2);
+                        color: white;
+                        border: 1px solid rgba(255,255,255,0.3);
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        text-decoration: none;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 8px;
+                        transition: background 0.2s;
+                    }}
+                    .btn:hover {{
+                        background: rgba(255,255,255,0.3);
+                    }}
+                    .image-container {{
+                        padding: 20px;
+                        text-align: center;
+                        background: #fafafa;
+                        min-height: 400px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }}
+                    .image-container img {{
+                        max-width: 100%;
+                        max-height: calc(100vh - 200px);
+                        height: auto;
+                        border-radius: 4px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                        cursor: zoom-in;
+                    }}
+                    .image-container img.zoomed {{
+                        max-width: none;
+                        max-height: none;
+                        width: auto;
+                        height: auto;
+                        cursor: zoom-out;
+                    }}
+                    .info {{
+                        padding: 15px 20px;
+                        border-top: 1px solid #e1e8ed;
+                        background: #f8f9fa;
+                        font-size: 14px;
+                        color: #666;
+                    }}
+                    @media print {{
+                        .header, .controls, .info {{
+                            display: none;
+                        }}
+                        .image-container {{
+                            padding: 0;
+                            background: white;
+                        }}
+                        .image-container img {{
+                            max-width: 100%;
+                            max-height: 100vh;
+                            box-shadow: none;
+                        }}
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>📄 {document.title}</h1>
+                        <div class="controls">
+                            <a href="/documents/download/{document_id}" class="btn">
+                                <span>⬇️</span> Download
+                            </a>
+                            <a href="/documents/print/{document_id}" target="_blank" class="btn">
+                                <span>🖨️</span> Print
+                            </a>
+                            <button onclick="window.close()" class="btn">
+                                <span>✕</span> Close
+                            </button>
+                        </div>
+                    </div>
+                    <div class="image-container">
+                        <img src="{file_url}" alt="{document.title}" id="documentImage" onclick="toggleZoom(this)">
+                    </div>
+                    <div class="info">
+                        <strong>Category:</strong> {document.category.title()} | 
+                        <strong>Type:</strong> {document.document_type} | 
+                        <strong>Uploaded:</strong> {document.created_at.strftime('%Y-%m-%d %H:%M') if document.created_at else 'N/A'}
+                    </div>
+                </div>
+                <script>
+                    function toggleZoom(img) {{
+                        img.classList.toggle('zoomed');
+                    }}
+                </script>
+            </body>
+            </html>
+            """
+            return HTMLResponse(html_content)
+        # For PDF, serve inline
+        elif file_ext == ".pdf":
+            from fastapi.responses import FileResponse
+            return FileResponse(
+                document.file_path,
+                media_type="application/pdf",
+                headers={"Content-Disposition": "inline"}
+            )
+        else:
+            # For DOC/DOCX, redirect to download
+            return RedirectResponse(url=f"/documents/download/{document_id}", status_code=303)
+    
+    except Exception as e:
+        return HTMLResponse(f"<h1>Error: {str(e)}</h1>", status_code=500)
+
+@app.get("/documents/file/{document_id}")
+async def get_document_file(
+    document_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Serve document file directly (for images)"""
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        if not os.path.exists(document.file_path):
+            raise HTTPException(status_code=404, detail="File not found on server")
+        
+        from fastapi.responses import FileResponse
+        
+        file_ext = os.path.splitext(document.file_path)[1].lower()
+        media_types = {
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png"
+        }
+        media_type = media_types.get(file_ext, "application/octet-stream")
+        
+        return FileResponse(
+            document.file_path,
+            media_type=media_type,
+            headers={"Content-Disposition": "inline"}
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/documents/download/{document_id}")
+async def download_document(
+    document_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Download document file"""
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        if not os.path.exists(document.file_path):
+            raise HTTPException(status_code=404, detail="File not found on server")
+        
+        from fastapi.responses import FileResponse
+        
+        file_ext = os.path.splitext(document.file_path)[1].lower()
+        media_types = {
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png"
+        }
+        media_type = media_types.get(file_ext, "application/octet-stream")
+        
+        # Get original filename from file_path or use title
+        filename = os.path.basename(document.file_path)
+        # Try to extract original name (before timestamp)
+        if "_" in filename:
+            parts = filename.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].replace(file_ext, "").isdigit():
+                filename = parts[0] + file_ext
+        
+        # Use RFC 5987 encoding for filenames with non-ASCII characters
+        # Format: filename*=UTF-8''<url-encoded-filename>
+        encoded_filename = quote(filename, safe='')
+        content_disposition = f'attachment; filename*=UTF-8\'\'{encoded_filename}'
+        
+        return FileResponse(
+            document.file_path,
+            media_type=media_type,
+            headers={"Content-Disposition": content_disposition}
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/documents/print/{document_id}", response_class=HTMLResponse)
+async def print_document(
+    document_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Print document page (opens document in new window with print dialog)"""
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            return HTMLResponse("<h1>Document not found</h1>", status_code=404)
+        
+        file_ext = os.path.splitext(document.file_path)[1].lower()
+        
+        # For images, display with print support
+        if file_ext in [".jpg", ".jpeg", ".png"]:
+            file_url = f"/documents/file/{document_id}"
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Print {document.title}</title>
+                <meta charset="UTF-8">
+                <style>
+                    * {{
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }}
+                    body {{
+                        font-family: Arial, sans-serif;
+                        background: #f5f5f5;
+                        padding: 20px;
+                    }}
+                    .print-controls {{
+                        position: fixed;
+                        top: 10px;
+                        right: 10px;
+                        z-index: 1000;
+                        background: white;
+                        padding: 10px;
+                        border-radius: 5px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                    }}
+                    button {{
+                        padding: 10px 20px;
+                        margin: 5px;
+                        background: #667eea;
+                        color: white;
+                        border: none;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 14px;
+                    }}
+                    button:hover {{
+                        background: #5568d3;
+                    }}
+                    .image-container {{
+                        text-align: center;
+                        padding: 20px;
+                        background: white;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    }}
+                    .image-container img {{
+                        max-width: 100%;
+                        height: auto;
+                    }}
+                    @media print {{
+                        .print-controls {{
+                            display: none;
+                        }}
+                        body {{
+                            padding: 0;
+                            background: white;
+                        }}
+                        .image-container {{
+                            box-shadow: none;
+                            padding: 0;
+                        }}
+                        .image-container img {{
+                            max-width: 100%;
+                            max-height: 100vh;
+                        }}
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="print-controls">
+                    <button onclick="window.print()">🖨️ Print</button>
+                    <button onclick="window.close()">✕ Close</button>
+                </div>
+                <div class="image-container">
+                    <img src="{file_url}" alt="{document.title}">
+                </div>
+            </body>
+            </html>
+            """
+            return HTMLResponse(html_content)
+        # For PDF, embed with print button
+        elif file_ext == ".pdf":
+            file_url = f"/documents/view/{document_id}"
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Print {document.title}</title>
+                <style>
+                    body {{ margin: 0; padding: 20px; }}
+                    .print-controls {{
+                        position: fixed;
+                        top: 10px;
+                        right: 10px;
+                        z-index: 1000;
+                        background: white;
+                        padding: 10px;
+                        border-radius: 5px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                    }}
+                    button {{
+                        padding: 10px 20px;
+                        margin: 5px;
+                        background: #667eea;
+                        color: white;
+                        border: none;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 14px;
+                    }}
+                    button:hover {{ background: #5568d3; }}
+                    iframe {{
+                        width: 100%;
+                        height: calc(100vh - 40px);
+                        border: none;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="print-controls">
+                    <button onclick="window.print()">🖨️ Print</button>
+                    <button onclick="window.close()">✕ Close</button>
+                </div>
+                <iframe src="{file_url}"></iframe>
+            </body>
+            </html>
+            """
+            return HTMLResponse(html_content)
+        else:
+            # For DOC/DOCX, show download message
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Print {document.title}</title>
+                <style>
+                    body {{
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                        font-family: Arial, sans-serif;
+                    }}
+                    .message {{
+                        text-align: center;
+                        padding: 40px;
+                        background: #f5f5f5;
+                        border-radius: 10px;
+                        max-width: 500px;
+                    }}
+                    button {{
+                        padding: 12px 24px;
+                        margin: 10px;
+                        background: #667eea;
+                        color: white;
+                        border: none;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 16px;
+                    }}
+                    button:hover {{ background: #5568d3; }}
+                </style>
+            </head>
+            <body>
+                <div class="message">
+                    <h2>📄 {document.title}</h2>
+                    <p>This document type cannot be printed directly in the browser.</p>
+                    <p>Please download the file and print it using your document viewer.</p>
+                    <button onclick="window.location.href='/documents/download/{document_id}'">Download File</button>
+                    <button onclick="window.close()">Close</button>
+                </div>
+            </body>
+            </html>
+            """
+            return HTMLResponse(html_content)
+    
+    except Exception as e:
+        return HTMLResponse(f"<h1>Error: {str(e)}</h1>", status_code=500)
 
 # Khởi tạo permissions sẽ được gọi sau khi initialize_permissions được định nghĩa
 def init_permissions_on_startup():
-    """Khởi tạo permissions khi khởi động ứng dụng"""
+    """Khởi tạo permissions khi khởi động ứng dụng - chỉ chạy nếu migration thành công"""
+    # Kiểm tra migration đã thành công chưa
+    global rbac_migration_success
+    
+    # Nếu migration thất bại, không chạy init permissions
+    if not rbac_migration_success:
+        print("Skipping permissions initialization: RBAC migration failed or not completed")
+        return
+    
     db = SessionLocal()
     try:
         initialize_permissions(db)
@@ -10825,7 +13003,7 @@ def init_permissions_on_startup():
     finally:
         db.close()
 
-# Chạy khởi tạo permissions khi khởi động ứng dụng
+# Chạy khởi tạo permissions khi khởi động ứng dụng (chỉ nếu migration thành công)
 init_permissions_on_startup()
 
 if __name__ == "__main__":
