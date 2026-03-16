@@ -9,6 +9,13 @@ import asyncio
 from io import BytesIO
 from http import HTTPStatus
 
+# Prefer a battle-tested ASGI->WSGI adapter if available.
+# On PythonAnywhere (WSGI-only), this avoids subtle issues like truncated/chunked responses.
+try:
+    from a2wsgi import ASGIMiddleware as _A2WSGI_ASGIMiddleware  # type: ignore
+except Exception:
+    _A2WSGI_ASGIMiddleware = None
+
 # Thêm đường dẫn project vào Python path
 path = os.path.dirname(os.path.abspath(__file__))
 if path not in sys.path:
@@ -180,5 +187,8 @@ class ASGItoWSGI:
         return [body]
 
 # Tạo WSGI application
-application = ASGItoWSGI(app)
+if _A2WSGI_ASGIMiddleware is not None:
+    application = _A2WSGI_ASGIMiddleware(app)
+else:
+    application = ASGItoWSGI(app)
 
