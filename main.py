@@ -1784,15 +1784,25 @@ def delete_file_if_exists(file_path: str):
             except Exception as e:
                 print(f"Lỗi khi xóa file {abs_path}: {e}")
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static files (use absolute paths so it works under WSGI/any working dir)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+PICTURE_DIR = os.path.join(BASE_DIR, PICTURE_BASE_DIR)
+
+# Ensure directories exist so Starlette/StaticFiles won't crash at import time
+ensure_directory_exists(STATIC_DIR)
+ensure_directory_exists(UPLOADS_DIR)
+ensure_directory_exists(PICTURE_DIR)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # Mount Picture directory để truy cập ảnh
-ensure_directory_exists(PICTURE_BASE_DIR)
-app.mount("/Picture", StaticFiles(directory=PICTURE_BASE_DIR), name="picture")
+app.mount("/Picture", StaticFiles(directory=PICTURE_DIR), name="picture")
 
 # Mount documents upload directory
 ensure_document_dirs()
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 # Ensure administrative documents directory exists (function is defined later in file)
 
