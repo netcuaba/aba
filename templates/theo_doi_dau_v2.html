@@ -296,6 +296,7 @@
                         <th>Ngày áp dụng</th>
                         <th>Đơn giá dầu</th>
                         <th>Ngày tạo</th>
+                        <th>Tỷ lệ % tăng giảm</th>
                         <th>Thao tác</th>
                     </tr>
                 </thead>
@@ -307,6 +308,9 @@
                             <td>{{ price.application_date.strftime('%d/%m/%Y') }}</td>
                             <td class="number"><strong>{{ "{:,.0f}".format(price.unit_price) }} đ</strong></td>
                             <td>{{ price.created_at.strftime('%d/%m/%Y %H:%M') if price.created_at else '' }}</td>
+                            <td class="percent-change" data-current-price="{{ price.unit_price }}" data-price-index="{{ loop.index0 }}">
+                                <!-- Sẽ được tính toán bằng JavaScript -->
+                            </td>
                             <td class="actions">
                                 <button class="btn btn-warning btn-sm" onclick="editPrice({{ price.id }})" title="Sửa">
                                     ✏️ Sửa
@@ -316,7 +320,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="5" class="text-center">Chưa có dữ liệu giá dầu. Nhấn nút "Cập nhật giá xăng dầu hôm nay" để thêm mới.</td>
+                            <td colspan="6" class="text-center">Chưa có dữ liệu giá dầu. Nhấn nút "Cập nhật giá xăng dầu hôm nay" để thêm mới.</td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -1360,6 +1364,10 @@ function switchSheet(sheetName) {
         document.getElementById('sheetGiaDau').style.display = 'block';
         document.getElementById('tabGiaDau').classList.add('active');
         loadDieselPrices();
+        // Tính toán tỷ lệ % cho dữ liệu được render từ server (nếu có)
+        setTimeout(() => {
+            calculatePercentChangesForServerRendered();
+        }, 100);
     }
 }
 
@@ -1524,23 +1532,59 @@ async function loadDieselPrices() {
     }
 }
 
+// Tính tỷ lệ % tăng giảm
+function calculatePercentChange(currentPrice, previousPrice) {
+    if (!previousPrice || previousPrice === 0) {
+        return null; // Không có dữ liệu trước đó
+    }
+    const percentChange = ((currentPrice - previousPrice) / previousPrice) * 100;
+    return percentChange;
+}
+
+// Format tỷ lệ % tăng giảm
+function formatPercentChange(percentChange) {
+    if (percentChange === null || percentChange === undefined || isNaN(percentChange)) {
+        return '<span class="percent-no-data">--</span>';
+    }
+    
+    const rounded = percentChange.toFixed(2);
+    const sign = percentChange >= 0 ? '+' : '';
+    const className = percentChange >= 0 ? 'percent-positive' : 'percent-negative';
+    
+    return `<span class="${className}">${sign}${rounded}%</span>`;
+}
+
 // Render bảng giá dầu
 function renderPriceTable() {
     const tbody = document.getElementById('dieselPriceBody');
     
     if (allDieselPrices.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center">Chưa có dữ liệu giá dầu. Nhấn nút "Cập nhật giá xăng dầu hôm nay" để thêm mới.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center">Chưa có dữ liệu giá dầu. Nhấn nút "Cập nhật giá xăng dầu hôm nay" để thêm mới.</td></tr>';
         return;
     }
     
-    tbody.innerHTML = allDieselPrices.map((price, index) => {
+    // Đảm bảo dữ liệu được sắp xếp theo ngày áp dụng giảm dần (mới nhất trước)
+    const sortedPrices = [...allDieselPrices].sort((a, b) => {
+        const dateA = new Date(a.application_date);
+        const dateB = new Date(b.application_date);
+        return dateB - dateA; // Giảm dần
+    });
+    
+    tbody.innerHTML = sortedPrices.map((price, index) => {
         const createdDate = price.created_at ? formatDateTime(price.created_at) : '';
+        
+        // Lấy giá của bản ghi trước đó (tuần trước)
+        const previousPrice = index < sortedPrices.length - 1 ? sortedPrices[index + 1].unit_price : null;
+        const percentChange = calculatePercentChange(price.unit_price, previousPrice);
+        const percentDisplay = formatPercentChange(percentChange);
+        
         return `
             <tr data-price-id="${price.id}">
                 <td>${index + 1}</td>
                 <td>${formatDate(price.application_date)}</td>
                 <td class="number"><strong>${formatCurrency(price.unit_price)} đ</strong></td>
                 <td>${createdDate}</td>
+                <td class="percent-change">${percentDisplay}</td>
                 <td class="actions">
                     <button class="btn btn-warning btn-sm" onclick="editPrice(${price.id})" title="Sửa">
                         ✏️ Sửa
@@ -1697,11 +1741,53 @@ async function savePrice(event) {
     }
 }
 
+// Tính toán và hiển thị tỷ lệ % cho dữ liệu được render từ server
+function calculatePercentChangesForServerRendered() {
+    const rows = document.querySelectorAll('#dieselPriceBody tr[data-price-id]');
+    if (rows.length === 0) return;
+    
+    // Lấy tất cả giá từ các dòng (sử dụng data attribute)
+    const prices = Array.from(rows).map(row => {
+        const percentCell = row.querySelector('td.percent-change[data-current-price]');
+        if (percentCell) {
+            const price = parseFloat(percentCell.getAttribute('data-current-price'));
+            return isNaN(price) ? 0 : price;
+        }
+        // Fallback: parse từ text nếu không có data attribute
+        const priceCell = row.querySelector('td.number strong');
+        if (priceCell) {
+            const priceText = priceCell.textContent.replace(/[^\d]/g, '');
+            return parseFloat(priceText) || 0;
+        }
+        return 0;
+    });
+    
+    // Tính toán và cập nhật cho từng dòng
+    // Dữ liệu đã được sắp xếp giảm dần (mới nhất trước), nên bản ghi trước đó là index + 1
+    rows.forEach((row, index) => {
+        const currentPrice = prices[index];
+        const previousPrice = index < prices.length - 1 ? prices[index + 1] : null;
+        const percentChange = calculatePercentChange(currentPrice, previousPrice);
+        const percentDisplay = formatPercentChange(percentChange);
+        
+        const percentCell = row.querySelector('td.percent-change');
+        if (percentCell) {
+            percentCell.innerHTML = percentDisplay;
+            // Xóa data attribute sau khi đã tính toán để tránh nhầm lẫn
+            percentCell.removeAttribute('data-current-price');
+            percentCell.removeAttribute('data-price-index');
+        }
+    });
+}
+
 // Khởi tạo khi trang được load
 document.addEventListener('DOMContentLoaded', function() {
     // KHÔNG load lại dữ liệu vì đã được render từ server với filter tháng/năm
     // Chỉ load khi thực sự cần (ví dụ khi thêm/sửa/xóa từ các tab khác)
     // loadAllRecords(); // Đã comment để tránh ghi đè dữ liệu đã được filter
+    
+    // Tính toán tỷ lệ % cho dữ liệu được render từ server
+    calculatePercentChangesForServerRendered();
     
     // Khởi tạo giá trị mặc định cho bộ lọc Total
     const filterFromDate = document.getElementById('filterFromDate');
@@ -2005,6 +2091,26 @@ document.addEventListener('DOMContentLoaded', function() {
 .text-negative {
     color: #e74c3c;
     font-weight: 600;
+}
+
+.percent-change {
+    text-align: center;
+    font-weight: 500;
+}
+
+.percent-positive {
+    color: #27ae60;
+    font-weight: 600;
+}
+
+.percent-negative {
+    color: #e74c3c;
+    font-weight: 600;
+}
+
+.percent-no-data {
+    color: #95a5a6;
+    font-weight: 400;
 }
 
 /* Buttons */

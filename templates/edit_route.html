@@ -54,6 +54,14 @@
                    value="{{ route.monthly_salary or '' }}" oninput="formatNumberInput(this)" onblur="validateIntegerInput(this)">
             <small class="form-help">Nhập số nguyên (ví dụ: 10,500,000 hoặc 10500000)</small>
         </div>
+        <div class="form-group">
+            <label for="route_status">Trạng thái *</label>
+            <select id="route_status" name="route_status" required onchange="updateStatusColor(this)">
+                <option value="ONL" {% if (route.route_status or "ONL") == "ONL" %}selected{% endif %}>ONL</option>
+                <option value="OFF" {% if (route.route_status or "ONL") == "OFF" %}selected{% endif %}>OFF</option>
+            </select>
+            <small class="form-help" id="route_status_help">Trạng thái tuyến đường (ONL: đang hoạt động, OFF: tạm dừng)</small>
+        </div>
         <div class="form-group" style="display: flex; align-items: end; gap: 10px;">
             <button type="submit" class="btn btn-success">Cập nhật</button>
             <a href="/routes" class="btn btn-secondary">Hủy</a>
@@ -61,6 +69,19 @@
     </form>
     
     <script>
+    function updateStatusColor(selectElement) {
+        const helpText = document.getElementById('route_status_help');
+        if (selectElement.value === 'ONL') {
+            selectElement.style.color = '#27ae60';
+            selectElement.style.fontWeight = 'bold';
+            helpText.textContent = 'Trạng thái tuyến đường (ONL: đang hoạt động - màu xanh)';
+        } else {
+            selectElement.style.color = '#e74c3c';
+            selectElement.style.fontWeight = 'bold';
+            helpText.textContent = 'Trạng thái tuyến đường (OFF: tạm dừng - màu đỏ)';
+        }
+    }
+    
     function updateUnitPrice() {
         const routeType = document.getElementById('route_type').value;
         const unitPriceInput = document.getElementById('unit_price');
@@ -96,8 +117,42 @@
     // Gọi hàm khi trang load để cập nhật help text và hiển thị trường phí
     window.onload = function() {
         updateUnitPrice();
+        const statusSelect = document.getElementById('route_status');
+        if (statusSelect) {
+            updateStatusColor(statusSelect);
+        }
     };
     </script>
+    
+    <style>
+    /* Style cho select route_status */
+    #route_status {
+        padding: 8px 12px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: bold;
+        transition: all 0.3s;
+        cursor: pointer;
+    }
+    
+    #route_status:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    
+    #route_status option {
+        font-weight: bold;
+    }
+    
+    #route_status option[value="ONL"] {
+        color: #27ae60;
+    }
+    
+    #route_status option[value="OFF"] {
+        color: #e74c3c;
+    }
+    </style>
 </div>
 </div>
 {% endblock %}

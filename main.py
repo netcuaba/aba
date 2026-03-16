@@ -253,6 +253,7 @@ class Route(Base):
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True)
     is_active = Column(Integer, default=1)
     status = Column(Integer, default=1)  # 1: Active, 0: Inactive
+    route_status = Column(String, default="ONL")  # Trạng thái tuyến: ONL hoặc OFF
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -1282,6 +1283,45 @@ try:
     migrate_employee_social_insurance_salary()
 except Exception as e:
     print(f"Migration error for employees.social_insurance_salary (may be expected if table doesn't exist yet): {e}")
+
+# Migration: Thêm cột route_status vào bảng routes nếu chưa có và set mặc định ONL
+def migrate_route_status():
+    """Thêm cột route_status vào bảng routes nếu chưa có và set mặc định ONL cho các tuyến cũ"""
+    from sqlalchemy import inspect, text
+    
+    try:
+        inspector = inspect(engine)
+        # Kiểm tra xem bảng có tồn tại không
+        if 'routes' not in inspector.get_table_names():
+            print("Table routes does not exist yet, will be created by create_all")
+            return True
+        
+        existing_columns = [col['name'] for col in inspector.get_columns('routes')]
+        
+        with engine.connect() as conn:
+            # Thêm cột route_status nếu chưa có
+            if 'route_status' not in existing_columns:
+                conn.execute(text("ALTER TABLE routes ADD COLUMN route_status VARCHAR DEFAULT 'ONL'"))
+                # Set mặc định ONL cho tất cả các tuyến cũ
+                conn.execute(text("UPDATE routes SET route_status = 'ONL' WHERE route_status IS NULL"))
+                conn.commit()
+                print("Added column route_status to routes table and set default ONL for existing routes")
+            else:
+                # Nếu cột đã tồn tại nhưng có giá trị NULL, set mặc định ONL
+                conn.execute(text("UPDATE routes SET route_status = 'ONL' WHERE route_status IS NULL"))
+                conn.commit()
+                print("Updated NULL route_status values to ONL")
+        
+        return True
+    except Exception as e:
+        print(f"Migration error for routes.route_status: {e}")
+        return False
+
+# Chạy migration route_status
+try:
+    migrate_route_status()
+except Exception as e:
+    print(f"Migration error for routes.route_status (may be expected if table doesn't exist yet): {e}")
 
 # Dependency để lấy database session
 def get_db():
@@ -3634,6 +3674,7 @@ async def add_route(
     loading_fee: float = Form(0),
     distance: float = Form(0),
     monthly_salary: float = Form(0),
+    route_status: str = Form("ONL"),
     db: Session = Depends(get_db)
 ):
     route = Route(
@@ -3645,6 +3686,7 @@ async def add_route(
         loading_fee=loading_fee if loading_fee else 0,
         distance=distance,
         monthly_salary=monthly_salary,
+        route_status=route_status if route_status in ["ONL", "OFF"] else "ONL",
         vehicle_id=None  # No vehicle assigned by default
     )
     db.add(route)
@@ -3680,6 +3722,7 @@ async def edit_route(
     loading_fee: float = Form(0),
     distance: float = Form(0),
     monthly_salary: float = Form(0),
+    route_status: str = Form("ONL"),
     db: Session = Depends(get_db)
 ):
     route = db.query(Route).filter(Route.id == route_id, Route.status == 1).first()
@@ -3694,6 +3737,7 @@ async def edit_route(
     route.loading_fee = loading_fee if loading_fee else 0
     route.distance = distance
     route.monthly_salary = monthly_salary
+    route.route_status = route_status if route_status in ["ONL", "OFF"] else "ONL"
     
     db.commit()
     return RedirectResponse(url="/routes", status_code=303)
@@ -10454,7 +10498,12 @@ async def timekeeping_v1_detail_page(
     # Lấy tất cả employees để có thể bao gồm các lái xe đã gán (cho dữ liệu lịch sử)
     all_employees = db.query(Employee).filter(Employee.status == 1).all()
     vehicles = db.query(Vehicle).filter(Vehicle.status == 1).all()
-    routes = db.query(Route).filter(Route.is_active == 1, Route.status == 1).all()
+    # Chỉ lấy routes có route_status = "ONL" khi tạo bảng chấm công mới
+    routes = db.query(Route).filter(
+        Route.is_active == 1, 
+        Route.status == 1,
+        Route.route_status == "ONL"
+    ).all()
 
     # Tính dải ngày theo khoảng đã chọn
     date_range = []
