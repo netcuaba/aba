@@ -20,8 +20,18 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 # Tạo database
-SQLALCHEMY_DATABASE_URL = "sqlite:///./transport.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+# Use absolute path for sqlite so it works regardless of current working directory (e.g. PythonAnywhere uses /home/<user>)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_SQLITE_PATH = os.path.join(BASE_DIR, "transport.db")
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH}")
+
+_connect_args = {}
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    # - check_same_thread=False: allow FastAPI threadpool usage
+    # - timeout: avoid hanging forever on "database is locked"
+    _connect_args = {"check_same_thread": False, "timeout": 30}
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
