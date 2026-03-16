@@ -187,8 +187,16 @@ class ASGItoWSGI:
         return [body]
 
 # Tạo WSGI application
+# Print a clear one-line marker so we can confirm which adapter is actually used in server logs.
 if _A2WSGI_ASGIMiddleware is not None:
-    application = _A2WSGI_ASGIMiddleware(app)
+    try:
+        application = _A2WSGI_ASGIMiddleware(app)
+        print("WSGI adapter: a2wsgi.ASGIMiddleware", file=sys.stderr)
+    except Exception as e:
+        # If a2wsgi exists but fails for any reason, fall back to our adapter.
+        print(f"WSGI adapter: a2wsgi failed ({e!r}); falling back to custom ASGItoWSGI", file=sys.stderr)
+        application = ASGItoWSGI(app)
 else:
+    print("WSGI adapter: custom ASGItoWSGI (a2wsgi not available)", file=sys.stderr)
     application = ASGItoWSGI(app)
 
