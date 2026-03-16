@@ -26,7 +26,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Tạo templates với custom filters
-templates = Jinja2Templates(directory="templates")
+# Use absolute path so templates work under WSGI/any working directory (e.g. PythonAnywhere)
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 # Thêm custom filter để parse JSON
 def from_json(value):
