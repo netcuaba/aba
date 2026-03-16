@@ -7,6 +7,7 @@ import sys
 import os
 import asyncio
 from io import BytesIO
+from http import HTTPStatus
 
 # Thêm đường dẫn project vào Python path
 path = os.path.dirname(os.path.abspath(__file__))
@@ -159,11 +160,24 @@ class ASGItoWSGI:
             body_chunks = [b'Internal Server Error']
         
         # Start WSGI response
-        status_text = f"{status_code} OK"
+        try:
+            reason = HTTPStatus(status_code).phrase
+        except Exception:
+            reason = "OK" if status_code == 200 else "UNKNOWN"
+        status_text = f"{status_code} {reason}"
+
+        # Join body so we can set Content-Length consistently (helps some proxies/clients)
+        body = b"".join(body_chunks) if body_chunks else b""
+
+        # Ensure Content-Length is present
+        header_names = {k.lower() for k, _ in response_headers}
+        if "content-length" not in header_names:
+            response_headers = list(response_headers) + [("Content-Length", str(len(body)))]
+
         start_response(status_text, response_headers)
         
         # Return body
-        return body_chunks if body_chunks else [b'']
+        return [body]
 
 # Tạo WSGI application
 application = ASGItoWSGI(app)
