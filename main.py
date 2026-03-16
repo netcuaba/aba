@@ -1627,8 +1627,22 @@ app = FastAPI(title="Hệ thống quản lý vận chuyển")
 # Authentication middleware to protect all routes except /login and static files
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # Temporary bypass switch (set env BYPASS_LOGIN=1 on server)
+        # This is useful for quick deploy/debug on PythonAnywhere without going through login.
+        if os.getenv("BYPASS_LOGIN", "").strip() in {"1", "true", "TRUE", "yes", "YES"}:
+            # Ensure session looks authenticated
+            request.session.setdefault("user_id", 1)
+            request.session.setdefault("username", "bypass")
+            request.session.setdefault("role", "Admin")
+
+            # If user hits /login while bypass is enabled, send them to a real page.
+            if request.url.path == "/login":
+                return RedirectResponse(url="/statistics", status_code=303)
+
+            return await call_next(request)
+
         # Allow access to login page, logout, and static files
-        if request.url.path in ["/login", "/logout"] or request.url.path.startswith("/static/"):
+        if request.url.path in ["/login", "/logout"] or request.url.path.startswith("/static"):
             return await call_next(request)
         
         # Check if user is logged in
@@ -1861,6 +1875,13 @@ def verify_password(password: str, stored: str) -> bool:
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Trang đăng nhập"""
+    # If bypass is enabled, skip login completely
+    if os.getenv("BYPASS_LOGIN", "").strip() in {"1", "true", "TRUE", "yes", "YES"}:
+        request.session.setdefault("user_id", 1)
+        request.session.setdefault("username", "bypass")
+        request.session.setdefault("role", "Admin")
+        return RedirectResponse(url="/statistics", status_code=303)
+
     # If user is already logged in, redirect to home
     if request.session.get("user_id"):
         return RedirectResponse(url="/", status_code=303)
